@@ -1,0 +1,114 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+dist/
+build/
+out/
+.next/
+.expo/
+web-build/
+*.tsbuildinfo
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Environment files
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+.env.test
+!.env.example
+
+# Test / coverage
+coverage/
+.nyc_output/
+.nycrc
+*.lcov
+
+# Cache
+.cache/
+.turbo/
+.eslintcache
+.pnpm-store/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+*.swp
+*.swo
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# VS Code
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/tasks.json
+
+# JetBrains IDEs
+.idea/
+*.iml
+*.ipr
+*.iws
+.codestream/
+
+# Expo / React Native
+expo-env.d.ts
+
+# MongoDB
+*.mongodb
+mongo-data/
+mongodata/
+dump/
+data/
+
+# Redis
+dump.rdb
+
+# Docker
+*.pid
+docker-compose.override.yml
+
+# Uploads / assets
+/uploads/
+/uploads/*
+!uploads/.gitkeep
+/public/uploads/
+
+# Misc
+*.orig
+*.rej
+.DS_Store
+*.pid
+*.seed
+*.pid.lock
+.cache
+.npmrc-bak
+
+# Security keys / certs
+*.pem
+*.key
+*.crt
+!.gitkeep
