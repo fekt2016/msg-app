@@ -1,0 +1,10 @@
+{
+  "name": "context-router",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Graphify-backed context router for Claude Code. Runs on the UserPromptSubmit hook and injects only the minimal relevant project context before a coding task, instead of letting the model scan the whole repository.",
+  "engines": {
+    "node": ">=18"
+  }
+}

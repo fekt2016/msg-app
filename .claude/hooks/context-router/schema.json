@@ -1,0 +1,111 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://eaz.local/context-router.schema.json",
+  "title": "Context Router configuration",
+  "description": "Configuration for the Graphify-backed Context Router hook (.context-router.json at the repo root). Every field is optional; unset fields fall back to the built-in defaults in src/config.ts.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "enabled": { "type": "boolean", "description": "Master on/off switch." },
+    "graphifyCommand": {
+      "type": "string",
+      "description": "Graphify executable name or absolute path."
+    },
+    "graphPath": {
+      "type": "string",
+      "description": "Repo-relative path to graph.json (used for cache fingerprinting)."
+    },
+    "queryTimeoutMs": {
+      "type": "integer",
+      "minimum": 500,
+      "description": "Timeout for a single graphify query."
+    },
+    "codingTriggers": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Slash-commands that mark a prompt as a coding task, e.g. \"/implement\"."
+    },
+    "detectNonSlashTasks": {
+      "type": "boolean",
+      "description": "Also route plain-prose prompts that match codingKeywordPatterns."
+    },
+    "codingKeywordPatterns": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Case-insensitive regexes marking non-slash coding intent."
+    },
+    "ignoreIntentPatterns": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Case-insensitive regexes for prose to ignore (greetings, doc questions, \"explain …\")."
+    },
+    "fullRepoOverridePatterns": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Regexes that make the router stand down so the model may use the whole repo."
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxSourceFiles": { "type": "integer", "minimum": 1 },
+        "maxDocs": { "type": "integer", "minimum": 0 },
+        "maxAdrs": { "type": "integer", "minimum": 0 },
+        "maxSkills": { "type": "integer", "minimum": 0 },
+        "maxAgents": { "type": "integer", "minimum": 0 },
+        "maxCommands": { "type": "integer", "minimum": 0 },
+        "maxContextBytes": {
+          "type": "integer",
+          "minimum": 1000,
+          "description": "Hard byte ceiling on surfaced read-files (source + doc + adr)."
+        },
+        "graphifyBudget": {
+          "type": "integer",
+          "minimum": 200,
+          "description": "--budget passed to graphify query."
+        }
+      }
+    },
+    "cache": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "dir": { "type": "string", "description": "Repo-relative cache directory." },
+        "ttlSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0 = no TTL (only graph/HEAD fingerprint invalidation)."
+        }
+      }
+    },
+    "logging": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "level": { "type": "string", "enum": ["debug", "info", "warn", "error"] },
+        "file": { "type": "string", "description": "Repo-relative log file." },
+        "toStderr": { "type": "boolean" },
+        "showBlockInContext": {
+          "type": "boolean",
+          "description": "Prepend the human [Context Router] summary to the injected context."
+        }
+      }
+    },
+    "fallback": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "semantic": { "type": "boolean" },
+        "filesystem": { "type": "boolean" },
+        "searchGlobs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Directories/files the fallbacks are scoped to (never the whole repo)."
+        }
+      }
+    }
+  }
+}
