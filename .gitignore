@@ -42,6 +42,9 @@ coverage/
 .eslintcache
 .pnpm-store/
 
+# Graphify code-graph output
+graphify-out/
+
 # macOS
 .DS_Store
 .AppleDouble

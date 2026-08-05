@@ -1,148 +1,88 @@
-# TASKS.md
+---
+model: anthropic/claude-sonnet-4-6
+---
 
-Feature task tracking for the Eaz Community project.
+# TASKS.md — Eaz Community
 
-Status legend:
-
-- `[ ]` Not started
-- `[~]` In progress
-- `[x]` Complete
-
-Completion rule: a feature is complete only when Backend, Mobile, Database, API, Socket, Validation, Testing, Documentation, and Review are all done (see AGENTS.md and ENGINEERING_RULES.md).
+Feature-level task tracking. Order and phase numbers match `ROADMAP.md`.
+Check items off as they clear the full completion checklist in
+`ENGINEERING_RULES.md` §10 (Backend / Mobile / Database / API / Socket
+/ Validation / Testing / Documentation / Security reviewed / Code
+reviewed / Merged) — a checked box means _all_ of those are done, not
+just "backend done."
 
 ---
 
-## Project Setup
+## Phase 0: Foundation
 
-- [x] Project foundation (folders, README, .env.example, .gitignore, root workspace)
-- [ ] Initialize backend workspace (Express.js + TypeScript)
-- [ ] Initialize frontend workspace (React Native + Expo + TypeScript)
-- [ ] Docker setup for MongoDB, Redis, backend, frontend
-- [ ] CI/CD pipeline (GitHub Actions)
+- [x] Monorepo workspace setup (pnpm workspaces + pnpm-workspace.yaml)
+- [x] Backend workspace init (Express.js + TypeScript, strict tsconfig, layered skeleton)
+- [x] Frontend workspace init (React Native + Expo blank-typescript scaffold)
+- [x] Docker infrastructure (MongoDB, Redis) — docker-compose.yml
+- [x] CI/CD (GitHub Actions: lint, typecheck, test+coverage, build, compose validation)
+- [x] Environment configuration + startup validation (zod env, fail-fast)
+- [x] ESLint + Prettier + husky + lint-staged (shared flat config)
+- [x] Swagger/OpenAPI scaffold (swagger-jsdoc + swagger-ui-express at /api-docs)
+- [x] Test framework + coverage reporting wired into CI (vitest/v8 backend, jest-expo frontend, thresholds)
+- [x] Offline persistence layer scaffold (mobile) — WatermelonDB confirmed (`PROJECT_SPEC.md` §20); schema + database + provider wired, adapter strategy (SQLite prod / LokiJS tests)
 
-## 1. Authentication
+## Phase 1: Core Messaging
 
-- [ ] User registration
-- [ ] User login
-- [ ] OTP verification
-- [ ] Refresh token flow
-- [ ] Password reset
-- [ ] Mobile auth screens
-- [ ] Auth persistence
+- [x] Authentication (registration, login, OTP via Africa's Talking, refresh tokens) - Backend done: models (User/OtpCode/Session), repositories, service, token rotation, OTP providers (AT + logging), middleware (authenticate/authorize/validate), Zod validation, rate limiting, Swagger, 60 passing tests, coverage above thresholds. - Mobile done: branded welcome/login/register/OTP/home screens, React Navigation (auth + app stacks), AuthContext session restore + Bearer interceptor, SecureStore token storage, device ID via expo-application, OTP auto-submit (fixed stale-closure bug), 26 passing tests, typecheck + lint clean. Full flow live-verified on Android emulator: register → verify OTP → Home → logout → login. - **Bug fix (2026-08-04):** a retrospective review found `resendOtp`'s already-verified guard (`auth.service.ts`) was gated on `!isEmail(identifier) && purpose === 'VERIFY'` — meaning a verified **phone** account was correctly blocked from spamming VERIFY OTP resends, but a verified **email** account was not (the identifier-type check had no legitimate reason to be there). Fixed: guard now applies to `purpose === 'VERIFY'` regardless of identifier type. New tests cover both identifier types plus the still-allowed unverified-email-gets-a-fresh-OTP path. `security` signed off (non-blocking). - **Resolved (2026-08-04):** `architect` decided the account-existence-enumeration question (ADR 0002, `docs/architecture-decisions/0002-account-enumeration-posture.md`) — disclosure is acceptable only where a caller is claiming a _new_ identifier (`/auth/register`'s `409 IDENTIFIER_TAKEN` stays, genuine UX offset, no code change) but not on a follow-up action with no such offset (`/auth/resend-otp`). `/auth/login` was already correctly non-enumerating and stays untouched. Implemented: `resendOtp`'s `ALREADY_VERIFIED` error removed entirely — an already-verified account now gets a silent no-op (no OTP sent, no record created, no error), so the HTTP response (`200 {sent:true}`) is byte-identical across non-existent/unverified/verified accounts. Accepted residual (documented in the ADR, not mitigated): a minor timing difference between the no-op path and the send path — far weaker than the prior explicit `409`, still behind the 3/hour/IP OTP limiter.
+- [x] User profiles + media upload - Backend done: GET/PATCH /users/me + POST /users/me/avatar, Zod validation (displayName 1..50, bio max 160), multer memory storage with image type (JPEG/PNG/WebP) + size limit, Cloudinary storage provider with logging fallback, best-effort old-avatar cleanup, Swagger docs, full route/service/storage test coverage. - Mobile done: ProfileScreen (edit display name/bio, pick + upload avatar via expo-image-picker, char counter, loading/error/success states), users API client, AuthContext.refreshProfile to sync persisted session, tests for save + upload + cancel paths, typecheck + lint clean. Live-verified on emulator against demo account. ProfileScreen gained a back arrow (`‹`, `navigation.goBack()`), matching ChatScreen's pattern. - **Security fix (2026-08-04):** a retrospective review found avatar upload validation trusted `Content-Type` only, no magic-byte content sniffing — a direct violation of `CLAUDE.md` §11. Fixed with hand-rolled magic-byte checks (`sniffImageMimeType` in `mediaStorage.ts`) for JPEG/PNG/WebP, run against the actual uploaded buffer in `user.service.ts` before the file reaches Cloudinary; a `file-type` dependency was considered and rejected as unnecessary for 3 fixed-offset signatures. Tests assert a spoofed `Content-Type: image/png` header with non-image bytes is rejected (422), not just that valid files are accepted. - **Same pass:** `GET /api/v1/users` now properly paginated (`page`/`pageSize`, default 20/max 100, `meta` envelope) instead of a hardcoded, unpaginated 50-user cap — matches this project's standard convention (`CLAUDE.md` §8/§12). New `modules/users/user.repository.ts` (`userDirectoryRepository`, with `.lean()`) added for these directory-listing queries, since the methods being fixed actually lived in `modules/auth/user.repository.ts` (the `authentication` agent's domain) — the `backend` agent correctly declined to edit outside its module boundary rather than reach into `auth/`. The now-dead `listChatUsers`/`findVerifiedByPhoneNumbers` in `auth/user.repository.ts` were subsequently removed by the `authentication` agent. - **Caught before merge:** the pagination default-20 change would have silently truncated the mobile chat-contacts list (previously up to 50, hardcoded) for any user with 21+ verified contacts, since `HomeScreen` has no pagination UI. Fixed: `frontend/src/api/users.ts`'s `listUsers()` now explicitly requests `pageSize: 100` (the max) to preserve prior behavior until real pagination/infinite-scroll is built on `HomeScreen`.
+- [x] E2EE: Signal Protocol integration (1:1 chat) - Backend done: `modules/e2ee/` (model, repository, service, controller, routes, validation), key management endpoints (generate/upload/download/rotate/consume), encrypted message relay via REST, E2EE socket.io events (`chat:message:new`, `chat:message:delivered`, `chat:message:read`) wired into `app.ts`, env vars (`E2EE_ENABLED`, `E2EE_PRE_KEY_BATCH_SIZE`, `E2EE_ONE_TIME_PRE_KEY_BATCH_SIZE`), `.env.example` updated. - Mobile done: `e2ee/` module (crypto.ts with Web Crypto API ECDH + AES-GCM, keyStore.ts with SecureStore, e2eeApi.ts), ChatScreen with encrypted message send/receive, navigation updated (AppStackParamList + AppNavigator), realtime client updated with E2EE event types. - **Security fix (2026-08-04):** a retrospective review found the original implementation stored/generated private keys server-side and used an exported private key as a fake "signature" — a direct violation of the server-blind invariant. Fixed: private key material now generated and held exclusively on-device (`expo-secure-store`); server (`e2ee.model.ts`) stores public keys only, no `privateKey` field anywhere; signed-pre-key authenticated with a real ECDSA signature (separate signing keypair — see `docs/architecture-decisions/0001-e2ee-signing-key-split.md`); `verifyPreKeySignature` is now actually called on both send/receive paths in `ChatScreen.tsx` before a peer's key is trusted (previously implemented but never invoked). Verified with a real, non-mocked `crypto.subtle` round-trip test (`frontend/src/e2ee/crypto.roundtrip.test.ts`). `security` agent signed off. - **Known residual risk, explicitly accepted by the user (2026-08-04) as tracked follow-up, not a blocker:** the ECDSA signature added above authenticates the _signed pre-key_, not the ECDH key actually used for message agreement (`identityKey.publicKey`) — so a relay could still MITM by substituting only the agreement key while leaving the signed pre-key/signature untouched. This is the same underlying gap as "no forward secrecy" below (no TOFU/identity-pinning exists yet) and does not add new exposure beyond it. Tracked in the forward-secrecy item below, not a separate line — resolving X3DH must make the agreement key itself the authenticated one.
+- [ ] E2EE: group chat key-distribution scheme (separate scope from 1:1 — do not treat as an extension) - **Security fixes (2026-08-04):** `deleteSenderKey` had no ownership check (any authenticated user could delete any member's sender key) — fixed, now requires `senderId === req.user.id`. `uploadSenderKeys` had no group-membership check — originally fixed with a sender-key-data _inference_ (`isGroupParticipant`/`groupHasRecords`) because no group/membership collection existed for the opaque `groupId`. - **Resolved (2026-08-04, with Group chat below):** the inference-based check and its residual bootstrap/TOCTOU gap are **gone**. `groupId` is now a real `Group` `_id`, and `groupKeyService.uploadSenderKeys` authorizes against the authoritative `group_members` collection (`groupRepository.listMemberIds`): a non-member is rejected `403 NOT_GROUP_MEMBER`, and a sender key is never distributed to a recipient outside the group (`422 UNKNOWN_RECIPIENT`). The e2ee group routes now validate `groupId` as an ObjectId (prevents a Mongoose CastError → 500). The dead `isGroupParticipant`/`groupHasRecords` methods were removed and their tests reworked. The frontend crypto plumbing is now **wired** into `GroupChatScreen` via `e2ee/groupSession.ts` (generate/distribute/rotate own sender key; lazily fetch+unwrap+cache others'). Rotation on member-leave is implemented for forward secrecy. Box stays unchecked pending the shared Security review + Code review + merge with the Group chat item below.
+- [ ] E2EE: recovery-key backup/restore flow (lost-device history recovery)
+- [ ] E2EE: 1:1 forward secrecy — X3DH key agreement + Double-Ratchet, and peer identity authentication/TOFU (protocol-hardening follow-up; distinct from group-key and recovery-key). Current 1:1 E2EE is confidential + server-blind but derives the shared secret directly from the identity ECDH keys, which are not authenticated by any signature — pre-keys/OTKs are uploaded but unused in the encryption path, so there is no forward secrecy and no MITM resistance on the agreement key yet (see the accepted residual risk noted above). Builds on the ECDSA signing key from ADR 0001; does not block the sibling E2EE items. See `docs/architecture-decisions/0001-e2ee-signing-key-split.md`.
+- [x] Private chat (read receipts, delivery status — over encrypted payloads) - Backend done: realtime `validation.ts` zod schemas for `chat:message:new`/`chat:message:delivered`/`chat:message:read`; reworked `realtime/server.ts` chat handlers to relay the encrypted message to the recipient's `user:{id}` room (with `iv`) and to relay recipient-driven delivered/read acks back to the sender's room; invalid payloads rejected with logged warnings. 5 new realtime ack tests (9 total). Backend: 156 tests pass, typecheck + lint clean. - Mobile done: ChatScreen subscribes to `chat:message:new`/`delivered`/`read`, decrypts incoming ciphertext via `decryptMessage`, auto-emits delivered + read acks on receipt, marks own messages with ✓ (sent) / ✓✓ (delivered) / ✓✓ (read) status ticks; socket payload carries separate `ciphertext` + `iv` fields; Send button has `accessibilityRole="button"`. 4 new ChatScreen tests. Mobile: 46 tests pass, typecheck + lint clean.
+- [ ] Group chat _(in progress — backend + mobile + tests complete; pending Security review + Code review + merge)_ - Backend done: new `modules/groups/` (Group + GroupMember models, repository, service, controller, routes, validation) — create (creator→OWNER, invitees→MEMBER, 256-member cap), list-my-groups, get (member-only), add/remove members (owner-only), leave (owner blocked), soft-delete (owner-only, clears memberships). Mounted at `/api/v1/groups`, Swagger via JSDoc. `group_members` is now the authoritative membership source consumed by both `groupKeyService` (E2EE authorization, above) and the realtime room-join gate. - Realtime done: `realtime/groupEvents.ts` bus (`group:member:joined`/`left`/`deleted` → group room + affected user room); server-authoritative `group:subscribe`/`unsubscribe` (verifies `groupRepository.isMember` before joining `group:{id}`) + `chat:group:message:new`/`delivered`/`read` relayed to the group room (ciphertext-only, sender excluded, gated on room membership so a non-subscribed socket cannot inject). - Mobile done: `api/groups.ts` + `hooks/useGroups.ts`, `GroupsScreen` (list + New group), `CreateGroupScreen` (name + member multi-select), `GroupChatScreen` (subscribe, sender-key distribute/rotate, encrypt/decrypt via `e2ee/groupSession.ts`), navigation wired (Groups/GroupChat/CreateGroup), HomeScreen "Group chats" entry, realtime client group events/types. - Tests: backend group service + routes + realtime relay (270 backend tests pass, coverage floor met); frontend api/groups + groupSession + 3 screens (135 frontend tests pass, coverage 90.9%). `pnpm lint`/`typecheck` clean both workspaces. - **Residuals (tracked, not blocking; box stays unchecked):** 1. **Group read/delivered receipts are relayed but not surfaced** — `GroupChatScreen` emits `delivered` on receipt but does not yet render per-member group ticks (per-recipient aggregation deferred). 2. **Sender-key rotation on member-leave is best-effort client-side** — a member offline when another leaves re-syncs on next screen open (ensure-on-mount), but there is no server-driven rotation guarantee; adequate for the sender-key model, revisit with the X3DH follow-up. - **Security review + Code review done (2026-08-05):** both returned findings on the group E2EE surface. Blocking finding (server-side revocation gap): a removed member's socket was never evicted from `group:{id}` and their sender-key material was never purged, so they kept receiving/injecting group ciphertext. Fixed in commit `c9676d2`: (A) `groupEventBus` force-evicts the departed member's sockets from the room on member-left/removed/deleted; (B) `groupKeyService.purgeMember`/`purgeGroup` drop the member's own key + envelopes addressed to them on remove/leave and all group key material on delete (wiring the previously-dead `deleteByGroup`/new `deleteEnvelopesForRecipient`); (C) `getSenderKey`/`listSenderKeys` now `assertMember`; (D) `deleteSenderKey` ownership check moved controller→service; (E) `senderId` param ObjectId-validated (was CastError→500). Backend 278 tests pass (+8 regressions), coverage floor met, typecheck+lint clean. Non-blocking follow-ups deferred: N2 non-atomic group create/memberCount drift, N3 read-modify-write in `upsertEnvelopes`, N5 socket handler calls repo directly, N6 `GroupChatScreen` message double-render on reconnect. - Remaining before the box can be checked: **security re-confirmation that the blocking finding is cleared, then merge.**
+- [x] Dashboard: list chat users + Chat back navigation - Backend done: `GET /api/v1/users` returns verified, non-deleted users for chatting (excludes the authenticated user, sorted by display name, capped at 50) via new `userRepository.listChatUsers` + `userService.listChatUsers` + `userController.listChatUsers`. 3 new tests (service + routes). Backend: 159 tests pass, typecheck + lint clean. - Mobile done: HomeScreen lists chat users with avatar initials + online dot (from presence `onlineUserIds`), tapping navigates to `Chat`; empty/loading/error states; new `useChatUsers` hook + `listUsers` API client. ChatScreen gained a back arrow (`‹`, `navigation.goBack()`). 4 new tests (3 HomeScreen + 1 ChatScreen back). Mobile: 50 tests pass, typecheck + lint clean. - Demo accounts: `demo@eaz.com` / `demo12345678` (Demo User) and `kofi@eaz.com` / `kofi12345678` (Kofi Mensah) — each sees the other in their dashboard chat list.
+- [x] Bottom-navigation app shell (mobile infra, cross-phase) - Added `@react-navigation/bottom-tabs` (v7). New `navigation/MainTabs.tsx` hosts the four top-level destinations — Home / Communities / Chats / Profile — styled from `theme/tokens.ts` with `@expo/vector-icons` (Ionicons, filled/outline per focus state). `AppNavigator` is now a root stack over `MainTabs`, pushing detail screens (Chat, GroupChat, CommunityDetail, CreateCommunity, CreateGroup) full-screen so chat stays tab-free. `MainTabsParamList` added to `navigation/types.ts`; tab screens typed with `CompositeScreenProps` (tab + root stack). Back buttons removed from the now-tab-root Communities/Chats/Profile screens; HomeScreen's now-redundant "Browse communities"/"Group chats"/"Edit profile" buttons removed (tabs cover that navigation — also removed a latent bug where "Group chats" navigated to Communities). `AppStackParamList` no longer lists Home/Communities/Groups/Profile directly. Frontend: typecheck + lint clean, 29 suites / 150 tests pass.
+- [x] Contact-based friend discovery ("Find friends from contacts") - Backend done: `POST /api/v1/users/match-contacts` accepts up to 2000 phone numbers, normalizes them (strips formatting; Ghana `0xx...` → `233xx...`) via shared `utils/phone.ts`, and returns verified non-deleted users whose stored phone matches (new `userRepository.findVerifiedByPhoneNumbers`). Phone identifiers are now normalized at registration/lookup too (`auth.service.normalizeIdentifier`) so stored numbers are canonical. 7 new tests (service + routes). Backend: 166 tests pass, typecheck + lint clean. - Mobile done: `expo-contacts` installed + permission added to `app.json`; `contacts/contacts.ts` (permission request, read + normalize contact phones, dedupe), `useMatchContacts` hook, `matchContacts` API client; HomeScreen "Find friends from contacts" button flows permission → read contacts → match → shows matched users (tap → Chat) with denied/no-match hints. Uses the SDK 57 class-based API (`Contact.getAllDetails`) instead of deprecated `getContactsAsync`. 3 new HomeScreen tests + global `expo-contacts` jest mock. Mobile: 56 tests pass, typecheck + lint clean. - Fixed: `POST /users/match-contacts` returned 401 for logged-in users because the 15-min access token had expired and the client never refreshed. Added an axios response interceptor in `AuthContext` that refreshes the access token once (via existing `authApi.refresh`) and retries the request on 401; on refresh failure it clears the stored session (auto-logs out). 3 new AuthContext tests for refresh/retry, session-clear on invalid refresh, and skipping auth endpoints. Verified live: refresh endpoint rotates tokens correctly.
+- [x] Socket.IO realtime infra with Redis adapter (transports ciphertext only) - Backend: `realtime/socketAuth.ts` (JWT handshake auth, joins `user:{id}` room), `realtime/adapter.ts` (Redis pub/sub adapter w/ in-memory fallback for dev/tests), `realtime/presence.ts` (Redis presence store + `MemoryPresenceStore` for tests), `realtime/server.ts` (`createRealtimeServer` with injectable `adapter`/`presence` opts; events `presence:update`, `presence:list`), wired into `index.ts` bootstrap + graceful shutdown. 5 adapter + 4 presence tests. Backend: 96 tests, coverage thresholds met, typecheck + lint clean. - Mobile: `realtime/client.ts` (`realtimeClient` — token handshake, socket URL derived from API base), `realtime/RealtimeProvider.tsx` (`useRealtime`: connected, onlineUserIds, isOnline; connects on login, tears down on logout), wired in `App.tsx`; `HomeScreen` presence row ("Connected · N online"). Tests: `client.test.ts` 6 + `RealtimeProvider.test.tsx` 3. Mobile: 42 tests pass, typecheck clean. - **Bug fix (2026-08-04):** a retrospective review found the "in-memory fallback for dev/tests" claim above was false for a real Redis outage — `adapter.ts`'s `setup()` had no try/catch around `connect()`, so an outage at startup crashed the process (`process.exit(1)`) instead of falling back, and neither `adapter.ts` nor `presence.ts` had an `error` listener on their Redis clients, so a _mid-run_ disconnect also crashed the process via an unhandled EventEmitter event. Fixed: both now try/catch the initial connect (falling back to the in-memory adapter / `MemoryPresenceStore` on failure) and register `.on('error', ...)` handlers that log and degrade instead of crashing; `reconnectStrategy: false` set on both clients so node-redis doesn't retry indefinitely in the background after a failed connect. Also fixed in the same pass: Redis clients leaking on server shutdown (`RealtimeServer.close()` now calls `adapter.disconnect?.()`/`store.disconnect?.()`), a duplicate `socket.join('user:{id}')` call (removed, kept only in `socketAuthMiddleware`), and a `presence.ts` `getClient()` race where concurrent first callers each opened and orphaned a separate Redis connection (now memoized). New tests exercise the actual failure paths (mocked failing `connect()`, simulated mid-run `error` events, an end-to-end test proving the server still serves real socket.io-client traffic through the in-memory fallback) — the original review explicitly noted the absence of exactly this kind of test is why the bug shipped unnoticed. Backend: 211 tests pass, typecheck + lint clean.
 
-## 2. User Profile
+## Phase 2: Community Features
 
-- [ ] Profile schema
-- [ ] Profile CRUD APIs
-- [ ] Avatar upload (Cloudinary)
-- [ ] Mobile profile screens
-
-## 3. Private Chat
-
-- [ ] Conversation schema
-- [ ] Message schema
-- [ ] Chat REST APIs
-- [ ] Socket events (send, receive, read receipts)
-- [ ] Mobile chat UI
-- [ ] Offline queue
-
-## 4. Media Upload
-
-- [ ] Upload APIs (Multer + Cloudinary)
-- [ ] Validation and secure uploads
-- [ ] Media gallery in chats
-
-## 5. Group Chat
-
-- [ ] Group schema
-- [ ] Group APIs (create, join, leave, roles)
-- [ ] Group socket events
-- [ ] Mobile group UI
-
-## 6. Communities
-
-- [ ] Community schema
-- [ ] Community APIs
-- [ ] Community socket events
-- [ ] Mobile community UI
-
-## 7. Channels
-
-- [ ] Channel schema
-- [ ] Channel APIs
-- [ ] Mobile channel UI
-
-## 8. Stories
-
-- [ ] Story schema
-- [ ] Story APIs
-- [ ] Story socket events
-- [ ] Mobile stories UI
-
-## 9. Voice Calls
-
-- [ ] Voice call signaling
-- [ ] Mobile voice call UI
-
-## 10. Video Calls
-
-- [ ] Video call signaling
-- [ ] Mobile video call UI
-
-## 11. Notifications
-
-- [ ] Notification schema
-- [ ] FCM push notifications
+- [ ] Communities _(in progress — backend complete, mobile partially wired)_ - Backend done: `modules/communities/` (model, member model, repository, service, controller, routes, validation), full CRUD (create/list/get/update/soft-delete), join/leave, member listing + role management (OWNER/MODERATOR/MEMBER, ownership can't be assigned/modified), unique slug generation, search indexing + search fallback via `searchProvider` (Typesense, public content only), `realtime/communityEvents.ts` event bus (`community:member:joined` / `community:member:left` / `community:member:role`) wired into `communityService`, routes mounted at `/api/v1/communities` in `app.ts`, Swagger docs. 44 tests pass. - Mobile done: `api/communities.ts` client (create/list/get/update/delete/join/leave/members/role), `CommunitiesScreen` (browse + search), `CreateCommunityScreen`, `CommunityDetailScreen` (members, join/leave, manage roles), wired into `AppNavigator` (Communities / CommunityDetail / CreateCommunity). - **Update (2026-08-04):** frontend tests + realtime client wiring landed. - Tests: `api/communities.test.ts` (all 9 client methods, envelope/meta unwrapping) + `CommunitiesScreen` / `CreateCommunityScreen` / `CommunityDetailScreen` component tests — 20 new tests. Frontend suite: 107 tests pass, coverage thresholds met, typecheck + lint clean. (Encoded this codebase's RNTL v14 convention: `await render(...)` and `await fireEvent.*` — a sync `screen` access before commit reports a misleading "render has not been called".) - Realtime: `client.ts` gained `COMMUNITY_MEMBER_JOINED/LEFT/ROLE` events + `CommunityMemberEvent` type; `CommunityDetailScreen` subscribes and invalidates its `detail` + `members` queries for the viewed community (scoped to those two keys — invalidating `communityKeys.all` would double-refetch them by prefix). - Also removed an unreachable duplicate `!community` guard in `CommunityDetailScreen`. - **Role-management UI added:** `useUpdateMemberRole` hook + per-member "Make mod" / "Remove mod" controls in `CommunityDetailScreen`, shown only to OWNER/MODERATOR viewers and never for the OWNER row — mirroring the backend rules in `community.service.updateRole` (can't assign/modify OWNER). 4 tests (promote, demote, owner-has-no-control, hidden-from-non-managers). Frontend suite now 111 tests. - **Residual (tracked, not blocking; box stays unchecked):** 1. **Realtime is per-user, not per-community.** The backend emits `community:member:*` only to the _affected_ user's own `user:{id}` room (`realtime/communityEvents.ts`), so the wiring gives multi-device consistency for the current user's own join/leave/role changes — a member list does **not** live-update when _other_ users join/leave. A true live member view needs a `community:{id}` broadcast room (socket joins it on open, service broadcasts to it). Backend + realtime change, separate from this client wiring. - Remaining before the box can be checked: Security review + Code review + merge (residual #1 explicitly deferred as a separate backend/realtime task).
+- [x] Search infrastructure decision resolved + implemented - **Decision: Typesense** (self-hosted, GPL-3, RAM-bound index, Raft HA) — chosen over MongoDB Atlas Search (stack is self-hosted, no Atlas) and Meilisearch (predictable self-hosting + speed focus). Scoped to public content only (Communities, Channels, Marketplace); private message content excluded per Phase 1 E2EE. - Backend: `modules/search/typesense.ts` — `SearchProvider` (ping/createCollection/upsertDocuments/deleteDocument/search) with real Typesense client (lazy import, upsert action, batch 200) + `LoggingSearchProvider` dev fallback (mirrors OTP/media-storage pattern); `TYPESENSE_ENABLED`/`TYPESENSE_URL`/`TYPESENSE_API_KEY` env vars (zod-validated); `/health` reports `dependencies.search`. 12 tests. - Infra: docker-compose `typesense:26.0` service (port 8108) + native binary install for local dev (brew tap `typesense/tap`, run detached with `--data-dir`/`--api-key`/`--enable-cors`). Live-verified: create collection → upsert → typo-tolerant search ("headph" → Wireless Headphones) → delete. - Backend: 108 tests passing, coverage above thresholds, typecheck + lint clean.
+- [ ] Communities
+- [ ] Channels
+- [ ] Stories
+- [ ] Push notifications (FCM)
 - [ ] In-app notification center
 
-## 12. Marketplace
+## Phase 3: Marketplace & Payments
 
-- [ ] Product schema
-- [ ] Product APIs
-- [ ] Inventory
+- [ ] Marketplace (products, orders, inventory)
 - [ ] Business pages
+- [ ] Paystack payments + checkout
+- [ ] Order webhooks (idempotent)
+- [ ] Business/seller KYC decision resolved + implemented
 
-## 13. Payments
+## Phase 4: Realtime Calls
 
-- [ ] Paystack integration
-- [ ] Checkout flow
-- [ ] Order schema and APIs
-- [ ] Webhooks
+- [ ] WebRTC signaling + TURN/STUN provisioning
+- [ ] Voice calls
+- [ ] Video calls
 
-## 14. AI Assistant
+## Phase 5: Intelligence
 
-- [ ] AI assistant chat
+- [ ] AI assistant
 - [ ] Translation
-- [ ] Message summary
-- [ ] Smart reply
-- [ ] Context management
+- [ ] Message summary — **on-device only** for private chats (server never sees plaintext under full E2EE); server-side summary permitted only for Channels/Communities content
+- [ ] Smart reply — same on-device constraint as above
 
-## 15. Business Accounts
+## Phase 6: Platform & Admin
 
-- [ ] Business account schema
-- [ ] Business account APIs
-- [ ] Mobile business UI
+- [ ] Business accounts
+- [ ] Admin dashboard
+- [ ] Reports and moderation _(Moderation/Trust & Safety module)_
+- [ ] Settings and privacy controls
+- [ ] Ghana Data Protection Act (Act 843) compliance pass
 
-## 16. Admin Dashboard
+## Phase 7: Scale & Release
 
-- [ ] Admin APIs
-- [ ] Admin web dashboard
-- [ ] Reports and moderation
-
-## 17. Settings
-
-- [ ] User settings APIs
-- [ ] Mobile settings screens
-- [ ] Privacy controls
-
-## 18. Analytics
-
-- [ ] Event tracking
-- [ ] Analytics dashboards
-
-## 19. Release
-
-- [ ] Play Store release
-- [ ] App Store release
-- [ ] Production deployment
-- [ ] Monitoring and logging
+- [ ] Analytics
+- [ ] Performance/load testing (full pass — lighter passes also run after Phase 1 and Phase 4)
+- [ ] App Store / Play Store releases
+- [ ] Production deployment, monitoring, logging, backups

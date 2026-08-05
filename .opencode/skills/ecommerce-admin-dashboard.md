@@ -1,0 +1,130 @@
+---
+model: anthropic/claude-sonnet-4-6
+---
+
+# Skill: Admin Dashboard
+
+## Purpose
+
+Standardize how the admin web dashboard is built — pages, data tables, analytics, permissions, and audit — so all admin surfaces follow the same patterns and stay maintainable.
+
+## Scope
+
+- Dashboard architecture (Next.js App Router — see `ecommerce-nextjs-architecture.md`)
+- Analytics and reporting
+- CRUD screens, tables, filters, bulk actions
+- Permissions (RBAC)
+- Settings and activity logs
+
+## Architecture Principles
+
+1. **Admin is a separate role-gated experience**: its own route group `(dashboard)` with an admin-only layout; authorization enforced server-side (see `ecommerce-authentication.md`).
+2. **Server components fetch, client components interact**: initial data in Server Components; tables/filters/actions as Client Components using TanStack Query.
+3. **Every action is auditable**: mutations log an activity event (actor, action, target, before/after, timestamp).
+4. **CRUD is data-driven**: one reusable table component consumes a typed column definition; features don't re-implement tables.
+5. **Admin API is a first-class module**: admin-only endpoints under `/api/v1/admin/*` with RBAC middleware; never reuse buyer endpoints with elevated context.
+
+## Required Patterns
+
+### Folder Organization
+
+```text
+web/src/
+├── app/(dashboard)/
+│   ├── layout.tsx            # Admin shell (sidebar, header, guards)
+│   ├── page.tsx              # Overview: KPIs + charts
+│   ├── products/page.tsx     # CRUD screens
+│   ├── orders/page.tsx
+│   ├── users/page.tsx
+│   ├── analytics/page.tsx
+│   └── settings/page.tsx
+└── features/
+    ├── admin-table/          # Reusable DataTable + filters + bulk bar
+    ├── analytics/            # Charts, KPI cards, report hooks
+    └── <domain>/             # product/order/user admin features
+```
+
+### Analytics
+
+- KPI cards (revenue, orders, GMV, active users) from aggregated endpoints (`/api/v1/admin/analytics/*`).
+- Charts use a charting lib consistent project-wide; data fetched with TanStack Query with `refetchInterval` for near-realtime.
+- Prefer server-side aggregations (MongoDB aggregation) over client-side math on raw rows.
+- Date-range filters apply server-side; cacheable ranges (today, 7d, 30d) get Redis caching.
+
+### CRUD Screens & Tables
+
+- One `DataTable` primitive: column defs, sorting, pagination, row selection, empty/loading/error states.
+- Filters bind to the URL (searchParams) so they're shareable — see `ecommerce-nextjs-architecture.md`.
+- CRUD forms reuse React Hook Form + Zod schemas from the shared feature schema (`ecommerce-nextjs-architecture.md` §Forms).
+- Create/edit/delete go through TanStack Query mutations and invalidate the affected list queries.
+
+### Bulk Actions
+
+- Row selection feeds a bulk bar (e.g., archive selected, mark shipped, bulk status change).
+- Bulk actions call dedicated endpoints (`POST /api/v1/admin/products/bulk-archive`) with an array of ids — one request, one response summarizing per-id results.
+- Confirm destructive bulk actions; report failures per item.
+
+### Permissions
+
+- Roles: `ADMIN` and `SUPER_ADMIN` (admin management only). Role checks in both middleware and UI (hide actions the user can't perform).
+- Permissions map cleanly to route groups and button visibility; never gate on UI alone.
+- Sensitive actions (role changes, refunds, deletions) require `SUPER_ADMIN` and generate an audit event.
+
+### Settings
+
+- System settings (gateways, fees, thresholds) stored in a settings collection keyed by name; validated on write with Zod.
+- Settings are cached in Redis and invalidated on update.
+- Audit settings changes with before/after values.
+
+### Activity Logs
+
+- Central `ActivityLog { actor, action, targetType, targetId, before?, after?, ip?, at }`.
+- Written by the admin service layer (not by controllers) for every meaningful mutation.
+- Admin UI lists logs with actor/action/target filters and pagination.
+
+## Best Practices
+
+- Every admin endpoint validates query params (pagination, filters) per `ecommerce-api-patterns.md`.
+- Keep table fetches paginated; default page size 20, max 100.
+- Use the standard error/loading/empty states everywhere — no bespoke UX per screen.
+- Charts degrade gracefully to empty/error states.
+- Add accessibility (focus, contrast, keyboard) to tables and bulk bars.
+
+## Performance Considerations
+
+- Aggregations are heavier: limit ranges, index the aggregate fields, and cache.
+- Don't fetch full documents for tables — project minimal columns.
+- Debounce search inputs; virtualize long tables.
+- Avoid N+1 on rows that need related entity names — pre-aggregate or denormalize.
+
+## Security Considerations
+
+- All admin routes require `authorize('ADMIN')` server-side; `middleware.ts` guards page navigation, but data endpoints remain the real boundary.
+- Never expose audit logs with sensitive `before/after` values to non-admin roles.
+- Rate-limit admin auth and protect admin pages with session checks.
+- Log all admin auth failures.
+
+## Anti-Patterns to Avoid
+
+- Copy-pasting table implementations per screen.
+- Admin logic living in buyer endpoints.
+- Client-side role gating as the only security layer.
+- Fetching whole collections to "filter on the client".
+- Settings/audit writes that skip the service layer.
+
+## Common Mistakes
+
+- Missing pagination on analytics/activity endpoints.
+- Forgetting to invalidate list queries after a mutation.
+- Exposing `before/after` secrets in audit logs.
+- Building charts that don't handle empty datasets.
+- Not confirming destructive bulk actions.
+
+## AI Implementation Instructions
+
+1. Read admin requirements in `PROJECT_SPEC.md` Phase 6 and reuse the platform patterns in `ecommerce-nextjs-architecture.md`.
+2. Build the admin API module per `ecommerce-backend-architecture.md` under `/api/v1/admin/*` with RBAC + activity logging.
+3. Build the reusable DataTable, filter bar, and bulk-action primitives once; then compose feature screens.
+4. Wire analytics to server-side aggregations with caching.
+5. Add tests for permissions, audit logging, and table/query behavior — see `ecommerce-testing.md`.
+6. Update `TASKS.md`; do not mark complete until security + code review.

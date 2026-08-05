@@ -1,0 +1,71 @@
+{
+  "$schema": "./.claude/hooks/context-router/schema.json",
+  "enabled": true,
+
+  "graphifyCommand": "graphify",
+  "graphPath": "graphify-out/graph.json",
+  "queryTimeoutMs": 8000,
+
+  "codingTriggers": [
+    "/implement",
+    "/plan",
+    "/review",
+    "/refactor",
+    "/fix",
+    "/security",
+    "/performance",
+    "/release",
+    "/ship",
+    "/debug",
+    "/test"
+  ],
+
+  "detectNonSlashTasks": true,
+  "codingKeywordPatterns": [
+    "\\b(implement|add|build|create|scaffold|wire up)\\b.+\\b(endpoint|route|service|repository|model|screen|hook|migration|schema|module|feature|socket event)\\b",
+    "\\b(fix|debug|resolve)\\b.+\\b(bug|error|failing test|crash|regression)\\b",
+    "\\b(refactor|optimi[sz]e|harden|secure)\\b"
+  ],
+  "ignoreIntentPatterns": [
+    "^\\s*(hi|hey|hello|yo|thanks|thank you|ok|okay|cool|nice)\\b",
+    "^\\s*(what|why|how|when|who|where)\\b.*\\?\\s*$",
+    "^\\s*(explain|describe|summari[sz]e|tell me|what is|what does|what are|how does|walk me through)\\b"
+  ],
+  "fullRepoOverridePatterns": [
+    "\\b(whole|entire|full|across the (whole|entire))\\s+(repo|repository|codebase|project)\\b",
+    "\\bscan (the )?(whole|entire|full)?\\s*(repo|repository|codebase)\\b",
+    "\\bignore the context router\\b",
+    "\\bno context router\\b"
+  ],
+
+  "limits": {
+    "maxSourceFiles": 20,
+    "maxDocs": 6,
+    "maxAdrs": 3,
+    "maxSkills": 4,
+    "maxAgents": 3,
+    "maxCommands": 3,
+    "maxContextBytes": 120000,
+    "graphifyBudget": 3000
+  },
+
+  "cache": {
+    "enabled": true,
+    "dir": ".claude/hooks/context-router/.cache",
+    "ttlSeconds": 86400
+  },
+
+  "logging": {
+    "enabled": true,
+    "level": "info",
+    "file": ".claude/hooks/context-router/.cache/router.log",
+    "toStderr": true,
+    "showBlockInContext": true
+  },
+
+  "fallback": {
+    "semantic": true,
+    "filesystem": true,
+    "searchGlobs": ["backend/src", "frontend/src", "docs", ".opencode", "CLAUDE.md"]
+  }
+}
