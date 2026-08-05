@@ -15,11 +15,11 @@ describe('groupKeyStore', () => {
     mockStore.getItemAsync.mockResolvedValue(null);
   });
 
-  describe('saveOwnSenderKey / getOwnSenderKey', () => {
-    it('saves and retrieves an own sender key', async () => {
+  describe('saveOwnSenderKey / getOwnSenderKey / getOwnSenderKeyId', () => {
+    it('saves and retrieves an own sender key with its keyId', async () => {
       mockStore.getItemAsync.mockResolvedValue('my-sender-key');
 
-      await groupKeyStore.saveOwnSenderKey('g-1', 'my-sender-key');
+      await groupKeyStore.saveOwnSenderKey('g-1', 'my-sender-key', 7);
       const result = await groupKeyStore.getOwnSenderKey('g-1');
 
       expect(result).toBe('my-sender-key');
@@ -27,11 +27,24 @@ describe('groupKeyStore', () => {
         'e2ee_group_own_sender_key_g-1',
         'my-sender-key',
       );
+      expect(mockStore.setItemAsync).toHaveBeenCalledWith('e2ee_group_own_key_id_g-1', '7');
       expect(mockStore.getItemAsync).toHaveBeenCalledWith('e2ee_group_own_sender_key_g-1');
     });
 
     it('returns null when no key is stored', async () => {
       const result = await groupKeyStore.getOwnSenderKey('g-1');
+      expect(result).toBeNull();
+    });
+
+    it('returns the own keyId as a number', async () => {
+      mockStore.getItemAsync.mockResolvedValue('7');
+
+      const result = await groupKeyStore.getOwnSenderKeyId('g-1');
+      expect(result).toBe(7);
+    });
+
+    it('returns null when no own keyId is stored', async () => {
+      const result = await groupKeyStore.getOwnSenderKeyId('g-1');
       expect(result).toBeNull();
     });
   });
@@ -71,10 +84,11 @@ describe('groupKeyStore', () => {
   });
 
   describe('clearGroup', () => {
-    it('deletes the own sender key for the group', async () => {
+    it('deletes the own sender key and its keyId for the group', async () => {
       await groupKeyStore.clearGroup('g-1');
 
       expect(mockStore.deleteItemAsync).toHaveBeenCalledWith('e2ee_group_own_sender_key_g-1');
+      expect(mockStore.deleteItemAsync).toHaveBeenCalledWith('e2ee_group_own_key_id_g-1');
     });
   });
 });

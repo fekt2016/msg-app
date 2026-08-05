@@ -14,6 +14,8 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { Socket } from 'socket.io-client';
 import { useAuth } from '../auth/AuthContext';
 import { useRealtime } from '../realtime/RealtimeProvider';
+import { useConversationMessages } from '../hooks/useConversationMessages';
+import type { StoredMessage } from '../api/messages';
 import { realtimeClient, REALTIME_EVENTS, type EncryptedMessageEvent } from '../realtime/client';
 import {
   encryptMessage,
@@ -60,6 +62,50 @@ async function isPeerBundleVerified(bundle: E2eePublicKeyBundle): Promise<boolea
   }
 }
 
+/**
+ * Decrypts a persisted message fetched from the history endpoint. ECDH shared
+ * secrets are symmetric, so the same secret derived from our identity private
+ * key and the peer's identity public key works whether the message is ours or
+ * theirs. On any failure the raw ciphertext preview is kept (mirrors the live
+ * incoming path).
+ */
+async function decryptStoredMessage(
+  stored: StoredMessage,
+  currentUserId: string,
+): Promise<ChatMessage | null> {
+  const isOwn = stored.senderId === currentUserId;
+  const peerId = isOwn ? stored.recipientId : stored.senderId;
+  let ciphertext = stored.ciphertext;
+  let verificationFailed = false;
+  try {
+    const ourBundle = await keyStore.getKeyBundle();
+    const peerBundle = await fetchKeyBundle(peerId);
+    if (ourBundle && peerBundle?.identityKey?.publicKey) {
+      if (!(await isPeerBundleVerified(peerBundle))) {
+        verificationFailed = true;
+      } else {
+        const sharedSecret = await buildSharedSecret(
+          ourBundle.identityKey.privateKey,
+          peerBundle.identityKey.publicKey,
+        );
+        ciphertext = await decryptMessage(sharedSecret, stored.ciphertext, stored.iv);
+      }
+    }
+  } catch {
+    // Keep the raw ciphertext preview if decryption fails.
+  }
+  return {
+    id: stored.id,
+    senderId: stored.senderId,
+    ciphertext,
+    timestamp: stored.timestamp,
+    isOwn,
+    delivered: true,
+    read: true,
+    verificationFailed,
+  };
+}
+
 function StatusTicks({ delivered, read }: { delivered: boolean; read: boolean }) {
   if (read) {
     return <Text style={styles.statusTicksRead}>✓✓</Text>;
@@ -79,6 +125,49 @@ export function ChatScreen({ route, navigation }: Props) {
   const [inputText, setInputText] = useState('');
   const [keyError, setKeyError] = useState<string | null>(null);
   const flatListRef = useRef<FlatList>(null);
+  const historyMergedRef = useRef(false);
+  const { data: history, isLoading: historyLoading } = useConversationMessages(userId);
+
+  useEffect(() => {
+    if (!currentUserId || historyMergedRef.current) return;
+    if (!history || history.items.length === 0) {
+      if (history) historyMergedRef.current = true;
+      return;
+    }
+    historyMergedRef.current = true;
+
+    let cancelled = false;
+    void (async () => {
+      // Endpoint returns newest-first; reverse for chronological render order.
+      const decrypted = await Promise.all(
+        history.items.map((stored) =>
+          decryptStoredMessage(stored, currentUserId).catch(() => null),
+        ),
+      );
+      if (cancelled) return;
+      const loaded = (
+        decrypted.filter((m): m is ChatMessage => m !== null) as ChatMessage[]
+      ).reverse();
+      if (loaded.length > 0) {
+        setMessages((prev) => {
+          // A live message that arrived while history was fetching is already in
+          // state (its id is `${senderId}-${timestamp}`) — don't duplicate it.
+          const fresh = loaded.filter(
+            (m) =>
+              !prev.some(
+                (existing) =>
+                  existing.senderId === m.senderId && existing.timestamp === m.timestamp,
+              ),
+          );
+          return [...fresh, ...prev];
+        });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [history, currentUserId]);
 
   useEffect(() => {
     if (!currentUserId) return;
@@ -122,7 +211,14 @@ export function ChatScreen({ route, navigation }: Props) {
           verificationFailed,
         };
 
-        setMessages((prev) => [...prev, incoming]);
+        setMessages((prev) =>
+          prev.some(
+            (existing) =>
+              existing.senderId === incoming.senderId && existing.timestamp === incoming.timestamp,
+          )
+            ? prev
+            : [...prev, incoming],
+        );
 
         socket.emit(REALTIME_EVENTS.CHAT_MESSAGE_DELIVERED, {
           senderId: payload.senderId,
@@ -278,6 +374,13 @@ export function ChatScreen({ route, navigation }: Props) {
           data={messages}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.messagesList}
+          ListEmptyComponent={
+            historyLoading ? (
+              <Text style={styles.historyHint}>Loading conversation…</Text>
+            ) : (
+              <Text style={styles.historyHint}>No messages yet — say hi!</Text>
+            )
+          }
           renderItem={({ item }) => (
             <View
               style={[styles.messageBubble, item.isOwn ? styles.ownBubble : styles.otherBubble]}
@@ -387,6 +490,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
     gap: spacing.sm,
+    flexGrow: 1,
+  },
+  historyHint: {
+    color: colors.savannaMuted,
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: spacing.lg,
   },
   messageBubble: {
     maxWidth: '80%',

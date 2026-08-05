@@ -72,6 +72,7 @@ export interface CommunityMemberEvent {
 export interface GroupMessageEvent {
   groupId: string;
   senderId: string;
+  keyId: number;
   ciphertext: string;
   iv: string;
   timestamp: number;

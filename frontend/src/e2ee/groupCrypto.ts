@@ -25,14 +25,20 @@ export function importSenderKey(base64: string): Uint8Array {
   return base64ToBytes(base64);
 }
 
+/**
+ * Wraps a sender key for one recipient: encrypted with AES-GCM under the ECDH
+ * shared secret between sender and recipient identity keys. The envelope carries
+ * no keyId — the keyId is a session-level identity minted once per sender key
+ * (see groupSession), not per-recipient.
+ */
 export async function wrapSenderKeyForRecipient(
   senderKeyBytes: Uint8Array,
   senderIdentityPrivateKey: string,
   recipientIdentityPublicKey: string,
-): Promise<{ keyId: number; ciphertext: string; iv: string }> {
+): Promise<{ ciphertext: string; iv: string }> {
   const aesKey = await buildSharedSecret(senderIdentityPrivateKey, recipientIdentityPublicKey);
   const { ciphertext, iv } = await encryptMessage(aesKey, bytesToBase64(senderKeyBytes));
-  return { keyId: Date.now(), ciphertext, iv };
+  return { ciphertext, iv };
 }
 
 export async function unwrapSenderKey(

@@ -27,6 +27,7 @@ export const groupSubscribeSchema = z.object({
 
 export const chatGroupMessageNewSchema = z.object({
   groupId,
+  keyId: z.number().int().positive(),
   ciphertext: z.string().min(1),
   iv: z.string().min(1),
   timestamp: z.number().int().positive(),

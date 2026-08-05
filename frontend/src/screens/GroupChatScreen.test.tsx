@@ -81,7 +81,7 @@ describe('GroupChatScreen', () => {
   });
 
   it('encrypts and emits a message on send', async () => {
-    mockSession.encryptGroupMessage.mockResolvedValue({ ciphertext: 'ct', iv: 'iv' });
+    mockSession.encryptGroupMessage.mockResolvedValue({ ciphertext: 'ct', iv: 'iv', keyId: 3 });
     await renderScreen();
 
     await fireEvent.changeText(screen.getByPlaceholderText('Type a message…'), 'hello team');
@@ -92,7 +92,7 @@ describe('GroupChatScreen', () => {
     );
     expect(socket.emit).toHaveBeenCalledWith(
       'chat:group:message:new',
-      expect.objectContaining({ groupId: 'g1', ciphertext: 'ct', iv: 'iv' }),
+      expect.objectContaining({ groupId: 'g1', ciphertext: 'ct', iv: 'iv', keyId: 3 }),
     );
     expect(await screen.findByText('hello team')).toBeOnTheScreen();
   });

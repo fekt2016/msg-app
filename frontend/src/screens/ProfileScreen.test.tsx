@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react-nativ
 import * as SecureStore from 'expo-secure-store';
 import { AuthProvider } from '../auth/AuthContext';
 import * as usersApi from '../api/users';
+import * as authApi from '../api/auth';
 import * as ImagePicker from 'expo-image-picker';
 
 jest.mock('../api/client', () => ({
@@ -48,6 +49,7 @@ const mockSecure = SecureStore as unknown as {
 };
 
 const mockUsers = usersApi as jest.Mocked<typeof usersApi>;
+const mockAuth = authApi as jest.Mocked<typeof authApi>;
 const mockPicker = ImagePicker as unknown as { launchImageLibraryAsync: jest.Mock };
 
 import { ProfileScreen } from './ProfileScreen';
@@ -147,6 +149,17 @@ describe('ProfileScreen', () => {
 
     await waitFor(() => {
       expect(mockUsers.uploadAvatar).not.toHaveBeenCalled();
+    });
+  });
+
+  it('logs out the current user', async () => {
+    mockAuth.logout.mockResolvedValue(undefined as never);
+
+    await renderProfile();
+    await fireEvent.press(screen.getByRole('button', { name: 'Log out' }));
+
+    await waitFor(() => {
+      expect(mockAuth.logout).toHaveBeenCalledWith('rt');
     });
   });
 });

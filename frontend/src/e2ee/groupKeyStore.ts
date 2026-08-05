@@ -1,16 +1,25 @@
 import * as SecureStore from 'expo-secure-store';
 
 const OWN_KEY_PREFIX = 'e2ee_group_own_sender_key_';
+const OWN_KEY_ID_PREFIX = 'e2ee_group_own_key_id_';
 const RECEIVED_KEY_PREFIX = 'e2ee_group_received_sender_key_';
 const RECEIVED_KEY_ID_PREFIX = 'e2ee_group_received_key_id_';
 
 export const groupKeyStore = {
-  async saveOwnSenderKey(groupId: string, keyBase64: string): Promise<void> {
-    await SecureStore.setItemAsync(`${OWN_KEY_PREFIX}${groupId}`, keyBase64);
+  async saveOwnSenderKey(groupId: string, keyBase64: string, keyId: number): Promise<void> {
+    await Promise.all([
+      SecureStore.setItemAsync(`${OWN_KEY_PREFIX}${groupId}`, keyBase64),
+      SecureStore.setItemAsync(`${OWN_KEY_ID_PREFIX}${groupId}`, String(keyId)),
+    ]);
   },
 
   async getOwnSenderKey(groupId: string): Promise<string | null> {
     return SecureStore.getItemAsync(`${OWN_KEY_PREFIX}${groupId}`);
+  },
+
+  async getOwnSenderKeyId(groupId: string): Promise<number | null> {
+    const raw = await SecureStore.getItemAsync(`${OWN_KEY_ID_PREFIX}${groupId}`);
+    return raw ? Number(raw) : null;
   },
 
   async saveReceivedSenderKey(
@@ -35,6 +44,9 @@ export const groupKeyStore = {
   },
 
   async clearGroup(groupId: string): Promise<void> {
-    await SecureStore.deleteItemAsync(`${OWN_KEY_PREFIX}${groupId}`);
+    await Promise.all([
+      SecureStore.deleteItemAsync(`${OWN_KEY_PREFIX}${groupId}`),
+      SecureStore.deleteItemAsync(`${OWN_KEY_ID_PREFIX}${groupId}`),
+    ]);
   },
 };

@@ -98,6 +98,7 @@ export function GroupChatScreen({ route, navigation }: Props) {
           text = await decryptGroupMessage(
             groupId,
             payload.senderId,
+            payload.keyId,
             payload.ciphertext,
             payload.iv,
           );
@@ -160,8 +161,9 @@ export function GroupChatScreen({ route, navigation }: Props) {
 
     let ciphertext: string;
     let iv: string;
+    let keyId: number;
     try {
-      ({ ciphertext, iv } = await encryptGroupMessage(groupId, trimmed));
+      ({ ciphertext, iv, keyId } = await encryptGroupMessage(groupId, trimmed));
     } catch {
       setSessionError('Your group encryption keys are still being set up. Try again in a moment.');
       return;
@@ -183,7 +185,13 @@ export function GroupChatScreen({ route, navigation }: Props) {
     setInputText('');
 
     const socket = realtimeClient.connect();
-    socket.emit(REALTIME_EVENTS.CHAT_GROUP_MESSAGE_NEW, { groupId, ciphertext, iv, timestamp });
+    socket.emit(REALTIME_EVENTS.CHAT_GROUP_MESSAGE_NEW, {
+      groupId,
+      keyId,
+      ciphertext,
+      iv,
+      timestamp,
+    });
   }, [inputText, currentUserId, groupId]);
 
   if (!currentUserId) return null;

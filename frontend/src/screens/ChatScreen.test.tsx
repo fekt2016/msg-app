@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import * as SecureStore from 'expo-secure-store';
 import { AuthProvider } from '../auth/AuthContext';
 import { RealtimeProvider } from '../realtime/RealtimeProvider';
@@ -6,6 +7,7 @@ import * as e2eeApi from '../e2ee/e2eeApi';
 import * as crypto from '../e2ee/crypto';
 import * as keyStore from '../e2ee/keyStore';
 import * as client from '../realtime/client';
+import * as apiClientModule from '../api/client';
 
 jest.mock('../api/client', () => ({
   apiClient: {
@@ -23,6 +25,8 @@ jest.mock('../api/client', () => ({
   apiErrorMessage: (err: unknown) =>
     err instanceof Error ? err.message : 'Something went wrong. Please try again.',
 }));
+
+const mockApiClient = apiClientModule.apiClient as unknown as { get: jest.Mock };
 
 jest.mock('../api/auth', () => ({
   register: jest.fn(),
@@ -155,14 +159,18 @@ function renderChat(
   mockRealtimeClient.connect.mockReturnValue(socket);
   mockRealtimeClient.open.mockResolvedValue(socket);
   return render(
-    <AuthProvider>
-      <RealtimeProvider>
-        <ChatScreen
-          route={{ params: { userId: 'u2', displayName: 'Kofi' } } as never}
-          navigation={(navigation ?? { goBack: jest.fn() }) as never}
-        />
-      </RealtimeProvider>
-    </AuthProvider>,
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })}
+    >
+      <AuthProvider>
+        <RealtimeProvider>
+          <ChatScreen
+            route={{ params: { userId: 'u2', displayName: 'Kofi' } } as never}
+            navigation={(navigation ?? { goBack: jest.fn() }) as never}
+          />
+        </RealtimeProvider>
+      </AuthProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -183,6 +191,76 @@ describe('ChatScreen delivery and read status', () => {
     mockE2eeApi.fetchKeyBundle.mockResolvedValue(theirBundle);
     mockCrypto.buildSharedSecret.mockResolvedValue(new Uint8Array(32));
     mockCrypto.verifyPreKeySignature.mockResolvedValue(true);
+    mockApiClient.get.mockResolvedValue({
+      data: { data: { items: [], total: 0, page: 1, pageSize: 20 } },
+    });
+  });
+
+  it('loads and decrypts persisted conversation history on open', async () => {
+    mockCrypto.decryptMessage.mockResolvedValue('history message');
+    mockApiClient.get.mockResolvedValue({
+      data: {
+        data: {
+          items: [
+            {
+              id: 'm1',
+              senderId: 'u2',
+              recipientId: 'u1',
+              ciphertext: 'ct-hist',
+              iv: 'iv-hist',
+              timestamp: 1000,
+            },
+          ],
+          total: 1,
+          page: 1,
+          pageSize: 20,
+        },
+      },
+    });
+    const { socket } = makeSocket();
+    await renderChat(socket);
+
+    await waitFor(() => {
+      expect(screen.getByText(/history message/)).toBeOnTheScreen();
+    });
+  });
+
+  it('does not duplicate a live message that is also in history', async () => {
+    mockCrypto.decryptMessage.mockResolvedValue('overlap message');
+    mockApiClient.get.mockResolvedValue({
+      data: {
+        data: {
+          items: [
+            {
+              id: 'm1',
+              senderId: 'u2',
+              recipientId: 'u1',
+              ciphertext: 'ct-overlap',
+              iv: 'iv-overlap',
+              timestamp: 12345,
+            },
+          ],
+          total: 1,
+          page: 1,
+          pageSize: 20,
+        },
+      },
+    });
+    const { socket, emit } = makeSocket();
+    await renderChat(socket);
+
+    await act(async () => {
+      emit('chat:message:new', {
+        senderId: 'u2',
+        ciphertext: 'ct-overlap',
+        iv: 'iv-overlap',
+        timestamp: 12345,
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/overlap message/)).toHaveLength(1);
+    });
   });
 
   it('sends an encrypted message with a ciphertext and iv', async () => {

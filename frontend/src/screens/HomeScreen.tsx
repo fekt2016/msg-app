@@ -30,7 +30,7 @@ type ContactsState =
   | { status: 'error'; message: string };
 
 export function HomeScreen({ navigation }: Props) {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const { connected, onlineUserIds } = useRealtime();
   const { data: chatUsers, isLoading, isError, refetch } = useChatUsers();
   const matchContacts = useMatchContacts();
@@ -133,10 +133,6 @@ export function HomeScreen({ navigation }: Props) {
         ) : (
           <Text style={styles.muted}>No other users yet. Invite a friend to join.</Text>
         )}
-
-        <Pressable accessibilityRole="button" onPress={() => void logout()} style={styles.logout}>
-          <Text style={styles.logoutText}>Log out</Text>
-        </Pressable>
       </View>
     </SafeAreaView>
   );
@@ -284,14 +280,5 @@ const styles = StyleSheet.create({
   muted: {
     color: colors.savannaMuted,
     fontSize: 14,
-  },
-  logout: {
-    marginTop: spacing.xl,
-    alignSelf: 'flex-start',
-  },
-  logoutText: {
-    color: colors.terracotta,
-    fontSize: 15,
-    fontWeight: '600',
   },
 });

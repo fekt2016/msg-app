@@ -6,7 +6,6 @@ import { AuthProvider } from '../auth/AuthContext';
 import { RealtimeProvider } from '../realtime/RealtimeProvider';
 import * as client from '../realtime/client';
 import * as usersApi from '../api/users';
-import * as authApi from '../api/auth';
 
 jest.mock('../api/client', () => ({
   apiClient: {
@@ -83,7 +82,6 @@ const mockClient = client.realtimeClient as unknown as {
 };
 
 const mockUsers = usersApi as jest.Mocked<typeof usersApi>;
-const mockAuth = authApi as jest.Mocked<typeof authApi>;
 const mockContacts = Contacts as unknown as {
   getPermissionsAsync: jest.Mock;
   requestPermissionsAsync: jest.Mock;
@@ -234,19 +232,6 @@ describe('HomeScreen', () => {
     await fireEvent.press(screen.getByRole('button', { name: /Could not load users/ }));
 
     expect(await screen.findByText('Kofi')).toBeOnTheScreen();
-  });
-
-  it('logs out the current user', async () => {
-    mockUsers.listUsers.mockResolvedValue([] as never);
-    mockAuth.logout.mockResolvedValue(undefined as never);
-    const navigation = { navigate: jest.fn() };
-    const { socket } = await renderHome(navigation);
-
-    await fireEvent.press(screen.getByRole('button', { name: 'Log out' }));
-
-    await waitFor(() => {
-      expect(socket.disconnect).toHaveBeenCalled();
-    });
   });
 
   it('matches friends from contacts and shows them as chat targets', async () => {

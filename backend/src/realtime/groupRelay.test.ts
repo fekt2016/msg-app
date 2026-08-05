@@ -87,6 +87,7 @@ describe('group realtime relay', () => {
       const received = waitForEvent<{
         groupId: string;
         senderId: string;
+        keyId: number;
         ciphertext: string;
         iv: string;
         timestamp: number;
@@ -94,6 +95,7 @@ describe('group realtime relay', () => {
 
       alice.emit('chat:group:message:new', {
         groupId: GROUP,
+        keyId: 42,
         ciphertext: 'cipher',
         iv: 'iv',
         timestamp: 99,
@@ -102,11 +104,68 @@ describe('group realtime relay', () => {
       expect(await received).toEqual({
         groupId: GROUP,
         senderId: 'alice',
+        keyId: 42,
         ciphertext: 'cipher',
         iv: 'iv',
         timestamp: 99,
       });
 
+      alice.disconnect();
+      bob.disconnect();
+    });
+  });
+
+  // Regression (Bug 1 — BLOCKING): the sender's current key id must ride on the
+  // message so a receiver can tell when a departure-triggered rotation has made
+  // its cached received key stale. Before the fix `keyId` was absent from both
+  // the schema and the relayed payload, so a rotated sender was undecryptable to
+  // every remaining member until a reinstall.
+  it('relays the sender keyId so receivers can detect a rotated sender key', async () => {
+    isMember.mockResolvedValue(true);
+    await withServer(async (port) => {
+      const alice = rawSocket(port, 'alice');
+      const bob = rawSocket(port, 'bob');
+      await Promise.all([waitForConnect(alice), waitForConnect(bob)]);
+      await Promise.all([subscribe(alice, GROUP), subscribe(bob, GROUP)]);
+
+      const received = waitForEvent<{ keyId: number }>(bob, 'chat:group:message:new');
+      alice.emit('chat:group:message:new', {
+        groupId: GROUP,
+        keyId: 1712345,
+        ciphertext: 'c',
+        iv: 'i',
+        timestamp: 3,
+      });
+
+      expect((await received).keyId).toBe(1712345);
+      alice.disconnect();
+      bob.disconnect();
+    });
+  });
+
+  it('drops a group message missing the keyId', async () => {
+    isMember.mockResolvedValue(true);
+    await withServer(async (port) => {
+      const alice = rawSocket(port, 'alice');
+      const bob = rawSocket(port, 'bob');
+      await Promise.all([waitForConnect(alice), waitForConnect(bob)]);
+      await Promise.all([subscribe(alice, GROUP), subscribe(bob, GROUP)]);
+
+      let received = false;
+      bob.on('chat:group:message:new', () => {
+        received = true;
+      });
+      // No `keyId` — the schema must reject it rather than relay an un-versioned
+      // message a receiver can't reason about.
+      alice.emit('chat:group:message:new', {
+        groupId: GROUP,
+        ciphertext: 'c',
+        iv: 'i',
+        timestamp: 4,
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      expect(received).toBe(false);
       alice.disconnect();
       bob.disconnect();
     });

@@ -7,6 +7,7 @@ import { presenceStore, type PresenceStore } from './presence.js';
 import { communityEventBus } from './communityEvents.js';
 import { groupEventBus } from './groupEvents.js';
 import { groupRepository } from '../modules/groups/group.repository.js';
+import { messageService } from '../modules/messages/message.service.js';
 import {
   chatMessageNewSchema,
   chatMessageDeliveredSchema,
@@ -118,6 +119,21 @@ export async function createRealtimeServer(
         iv: payload.iv,
         timestamp: payload.timestamp,
       });
+
+      // Persist the ciphertext so both participants can replay history on any
+      // device. Best-effort: a storage failure must not drop the live message,
+      // so the broadcast above happens first and the failure is only logged.
+      void messageService
+        .storeMessage({
+          senderId: userId,
+          recipientId: payload.recipientId,
+          ciphertext: payload.ciphertext,
+          iv: payload.iv,
+          timestamp: payload.timestamp,
+        })
+        .catch((err: unknown) => {
+          logger.warn({ err, senderId: userId }, 'Failed to persist chat message');
+        });
     });
 
     socket.on(REALTIME_EVENTS.CHAT_MESSAGE_DELIVERED, (raw: unknown) => {
@@ -194,7 +210,7 @@ export async function createRealtimeServer(
         );
         return;
       }
-      const { groupId, ciphertext, iv, timestamp } = parsed.data;
+      const { groupId, keyId, ciphertext, iv, timestamp } = parsed.data;
       if (!socket.rooms.has(`group:${groupId}`)) {
         logger.warn(
           { userId, groupId },
@@ -205,6 +221,7 @@ export async function createRealtimeServer(
       socket.to(`group:${groupId}`).emit(REALTIME_EVENTS.CHAT_GROUP_MESSAGE_NEW, {
         groupId,
         senderId: userId,
+        keyId,
         ciphertext,
         iv,
         timestamp,

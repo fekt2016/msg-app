@@ -10,6 +10,7 @@ import authRouter from './modules/auth/auth.routes.js';
 import userRouter from './modules/users/user.routes.js';
 import communityRouter from './modules/communities/community.routes.js';
 import groupRouter from './modules/groups/group.routes.js';
+import messageRouter from './modules/messages/message.routes.js';
 import { e2eeRouter } from './modules/e2ee/e2ee.routes.js';
 import { groupKeyRouter } from './modules/e2ee/groupKey.routes.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
@@ -59,6 +60,7 @@ export function createApp(): Express {
   apiV1.use('/users', userRouter);
   apiV1.use('/communities', communityRouter);
   apiV1.use('/groups', groupRouter);
+  apiV1.use('/messages', messageRouter);
   apiV1.use('/e2ee', e2eeRouter);
   apiV1.use('/e2ee/groups', groupKeyRouter);
   app.use('/api/v1', apiV1);
