@@ -18,6 +18,13 @@ export interface SenderKeySummary {
   updatedAt: Date;
 }
 
+async function assertMember(groupId: string, userId: string): Promise<void> {
+  const isMember = await groupRepository.isMember(groupId, userId);
+  if (!isMember) {
+    throw new AppError(403, 'NOT_GROUP_MEMBER', 'You are not a member of this group');
+  }
+}
+
 export const groupKeyService = {
   /**
    * Stores a member's own sender-key envelopes for a group. Each envelope is the
@@ -85,13 +92,16 @@ export const groupKeyService = {
 
   /**
    * Returns the envelope addressed to the given recipient (the caller). A caller
-   * can only ever receive sender keys that were explicitly encrypted for them.
+   * can only ever receive sender keys that were explicitly encrypted for them,
+   * and only while they remain a member of the group — a removed member is
+   * rejected here even for envelopes distributed while they were still a member.
    */
   async getSenderKey(
     groupId: string,
     senderId: string,
     recipientId: string,
   ): Promise<SenderKeyEnvelopeOutput> {
+    await assertMember(groupId, recipientId);
     const envelope = await groupSenderKeyRepository.findEnvelopeForRecipient(
       groupId,
       senderId,
@@ -104,11 +114,38 @@ export const groupKeyService = {
   },
 
   async listSenderKeys(groupId: string, recipientId: string): Promise<SenderKeySummary[]> {
+    await assertMember(groupId, recipientId);
     return groupSenderKeyRepository.listSendersForRecipient(groupId, recipientId);
   },
 
-  async deleteSenderKey(groupId: string, senderId: string): Promise<void> {
+  /**
+   * Deletes a sender's own key for a group. Ownership is enforced here (not just
+   * at the controller): the caller may only delete their own sender key, per the
+   * "resource-level ownership checks live in the service" rule (CLAUDE.md §11).
+   */
+  async deleteSenderKey(groupId: string, senderId: string, callerId: string): Promise<void> {
+    if (senderId !== callerId) {
+      throw new AppError(403, 'FORBIDDEN', 'You can only delete your own sender key');
+    }
     await groupSenderKeyRepository.deleteSenderKey(groupId, senderId);
     logger.info({ groupId, senderId }, 'Group sender key deleted');
+  },
+
+  /**
+   * Server-side revocation when a member leaves or is removed: drop the member's
+   * own published sender key and every envelope addressed to them, so the server
+   * stops serving them key material. Remaining members rotate their sender keys
+   * client-side on the resulting `group:member:left` event.
+   */
+  async purgeMember(groupId: string, userId: string): Promise<void> {
+    await groupSenderKeyRepository.deleteSenderKey(groupId, userId);
+    await groupSenderKeyRepository.deleteEnvelopesForRecipient(groupId, userId);
+    logger.info({ groupId, userId }, 'Group sender-key material purged for departed member');
+  },
+
+  /** Server-side cleanup when a group is deleted: drop all sender-key material. */
+  async purgeGroup(groupId: string): Promise<void> {
+    await groupSenderKeyRepository.deleteByGroup(groupId);
+    logger.info({ groupId }, 'Group sender-key material purged on group delete');
   },
 };

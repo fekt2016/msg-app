@@ -11,12 +11,14 @@ vi.mock('./groupSenderKey.repository.js', () => ({
     listSendersForRecipient: vi.fn(),
     deleteSenderKey: vi.fn(),
     deleteByGroup: vi.fn(),
+    deleteEnvelopesForRecipient: vi.fn(),
   },
 }));
 
 vi.mock('../groups/group.repository.js', () => ({
   groupRepository: {
     listMemberIds: vi.fn(),
+    isMember: vi.fn(),
   },
 }));
 
@@ -98,6 +100,7 @@ describe('groupKeyService.uploadSenderKeys', () => {
 
 describe('groupKeyService.getSenderKey', () => {
   it('returns the envelope addressed to the recipient', async () => {
+    groups.isMember.mockResolvedValue(true);
     repo.findEnvelopeForRecipient.mockResolvedValue({
       recipientId: 'user-2',
       keyId: 3,
@@ -113,6 +116,7 @@ describe('groupKeyService.getSenderKey', () => {
   });
 
   it('throws 404 when no envelope exists for the recipient', async () => {
+    groups.isMember.mockResolvedValue(true);
     repo.findEnvelopeForRecipient.mockResolvedValue(null);
 
     await expect(groupKeyService.getSenderKey(GROUP, 'user-1', 'user-2')).rejects.toMatchObject({
@@ -120,10 +124,21 @@ describe('groupKeyService.getSenderKey', () => {
       code: 'SENDER_KEY_NOT_FOUND',
     });
   });
+
+  it('rejects a non-member (removed member) before reading any key material', async () => {
+    groups.isMember.mockResolvedValue(false);
+
+    await expect(groupKeyService.getSenderKey(GROUP, 'user-1', 'removed')).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'NOT_GROUP_MEMBER',
+    });
+    expect(repo.findEnvelopeForRecipient).not.toHaveBeenCalled();
+  });
 });
 
 describe('groupKeyService.listSenderKeys', () => {
   it('lists senders that distributed a key to the recipient', async () => {
+    groups.isMember.mockResolvedValue(true);
     repo.listSendersForRecipient.mockResolvedValue([
       { senderId: 'user-1', keyId: 3, updatedAt: new Date() },
     ]);
@@ -133,14 +148,53 @@ describe('groupKeyService.listSenderKeys', () => {
     expect(repo.listSendersForRecipient).toHaveBeenCalledWith(GROUP, 'user-2');
     expect(result).toHaveLength(1);
   });
+
+  it('rejects a non-member', async () => {
+    groups.isMember.mockResolvedValue(false);
+
+    await expect(groupKeyService.listSenderKeys(GROUP, 'removed')).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'NOT_GROUP_MEMBER',
+    });
+    expect(repo.listSendersForRecipient).not.toHaveBeenCalled();
+  });
 });
 
 describe('groupKeyService.deleteSenderKey', () => {
-  it('deletes the sender key', async () => {
+  it('deletes the caller’s own sender key', async () => {
     repo.deleteSenderKey.mockResolvedValue(undefined);
 
-    await groupKeyService.deleteSenderKey(GROUP, 'user-1');
+    await groupKeyService.deleteSenderKey(GROUP, 'user-1', 'user-1');
 
     expect(repo.deleteSenderKey).toHaveBeenCalledWith(GROUP, 'user-1');
+  });
+
+  it('forbids deleting another member’s sender key', async () => {
+    await expect(
+      groupKeyService.deleteSenderKey(GROUP, 'victim', 'attacker'),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'FORBIDDEN' });
+    expect(repo.deleteSenderKey).not.toHaveBeenCalled();
+  });
+});
+
+describe('groupKeyService.purgeMember', () => {
+  it('drops the member’s own key and every envelope addressed to them', async () => {
+    repo.deleteSenderKey.mockResolvedValue(undefined);
+    repo.deleteEnvelopesForRecipient.mockResolvedValue(undefined);
+
+    await groupKeyService.purgeMember(GROUP, 'gone');
+
+    expect(repo.deleteSenderKey).toHaveBeenCalledWith(GROUP, 'gone');
+    expect(repo.deleteEnvelopesForRecipient).toHaveBeenCalledWith(GROUP, 'gone');
+  });
+});
+
+describe('groupKeyService.purgeGroup', () => {
+  it('drops all sender-key material for the group', async () => {
+    repo.deleteByGroup.mockResolvedValue(undefined);
+
+    await groupKeyService.purgeGroup(GROUP);
+
+    expect(repo.deleteByGroup).toHaveBeenCalledWith(GROUP);
   });
 });

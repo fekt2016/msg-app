@@ -48,6 +48,11 @@ class GroupEventBusImpl implements GroupEventBus {
 
   emitMemberLeft(groupId: string, userId: string): void {
     this.emit(GROUP_EVENTS.MEMBER_LEFT, groupId, userId);
+    // Server-authoritative revocation: force the departed member's sockets out of
+    // the group room so they can no longer receive or inject group ciphertext.
+    // Emitted after the broadcast above so the member still receives the
+    // `group:member:left` notification on their own `user:{id}` room.
+    this.evictFromGroup(groupId, userId);
   }
 
   emitDeleted(groupId: string, memberIds: string[]): void {
@@ -58,7 +63,21 @@ class GroupEventBusImpl implements GroupEventBus {
     this.io.to(`group:${groupId}`).emit(GROUP_EVENTS.DELETED, payload);
     for (const userId of memberIds) {
       this.io.to(`user:${userId}`).emit(GROUP_EVENTS.DELETED, payload);
+      this.evictFromGroup(groupId, userId);
     }
+  }
+
+  /**
+   * Removes every one of a user's sockets from `group:{groupId}`. Because the
+   * message/ack relays treat room presence as proof of membership, eviction is
+   * what keeps that invariant true after a member is removed, left, or the group
+   * is deleted — the membership row is already gone by the time this runs.
+   */
+  private evictFromGroup(groupId: string, userId: string): void {
+    if (!this.io) {
+      return;
+    }
+    this.io.in(`user:${userId}`).socketsLeave(`group:${groupId}`);
   }
 }
 

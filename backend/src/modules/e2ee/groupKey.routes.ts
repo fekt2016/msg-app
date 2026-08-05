@@ -33,7 +33,7 @@ groupKeyRouter.use(authenticate);
  *     security:
  *       - bearerAuth: []
  *     parameters:
- *       - { name: groupId, in: path, required: true, schema: { type: string }, description: Opaque group identifier }
+ *       - { name: groupId, in: path, required: true, schema: { type: string }, description: Group id (a Group _id; membership is checked against group_members) }
  *     requestBody:
  *       required: true
  *       content:

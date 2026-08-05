@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { groupService } from './group.service.js';
 import * as groupRepositoryModule from './group.repository.js';
 import * as userRepositoryModule from '../auth/user.repository.js';
+import * as groupKeyServiceModule from '../e2ee/groupKey.service.js';
 import * as groupEventsModule from '../../realtime/groupEvents.js';
 
 vi.mock('./group.repository.js', () => ({
@@ -26,6 +27,13 @@ vi.mock('../auth/user.repository.js', () => ({
   },
 }));
 
+vi.mock('../e2ee/groupKey.service.js', () => ({
+  groupKeyService: {
+    purgeMember: vi.fn(),
+    purgeGroup: vi.fn(),
+  },
+}));
+
 vi.mock('../../realtime/groupEvents.js', () => ({
   groupEventBus: {
     emitMemberJoined: vi.fn(),
@@ -36,6 +44,7 @@ vi.mock('../../realtime/groupEvents.js', () => ({
 
 const repo = vi.mocked(groupRepositoryModule.groupRepository);
 const users = vi.mocked(userRepositoryModule.userRepository);
+const groupKeys = vi.mocked(groupKeyServiceModule.groupKeyService);
 const bus = vi.mocked(groupEventsModule.groupEventBus);
 
 const OWNER = 'owner-1';
@@ -156,6 +165,7 @@ describe('groupService.removeMember', () => {
     await groupService.removeMember(OWNER, 'g-1', 'u-2');
     expect(repo.removeMember).toHaveBeenCalledWith('g-1', 'u-2');
     expect(repo.incrementMemberCount).toHaveBeenCalledWith('g-1', -1);
+    expect(groupKeys.purgeMember).toHaveBeenCalledWith('g-1', 'u-2');
     expect(bus.emitMemberLeft).toHaveBeenCalledWith('g-1', 'u-2');
   });
 
@@ -175,6 +185,7 @@ describe('groupService.leave', () => {
 
     await groupService.leave('u-2', 'g-1');
     expect(repo.removeMember).toHaveBeenCalledWith('g-1', 'u-2');
+    expect(groupKeys.purgeMember).toHaveBeenCalledWith('g-1', 'u-2');
     expect(bus.emitMemberLeft).toHaveBeenCalledWith('g-1', 'u-2');
   });
 
@@ -199,6 +210,7 @@ describe('groupService.softDelete', () => {
     expect(repo.softDelete).toHaveBeenCalledWith('g-1');
     expect(repo.removeMember).toHaveBeenCalledWith('g-1', OWNER);
     expect(repo.removeMember).toHaveBeenCalledWith('g-1', 'u-2');
+    expect(groupKeys.purgeGroup).toHaveBeenCalledWith('g-1');
     expect(bus.emitDeleted).toHaveBeenCalledWith('g-1', [OWNER, 'u-2']);
   });
 

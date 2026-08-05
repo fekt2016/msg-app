@@ -1,6 +1,7 @@
 import { AppError } from '../../errors/AppError.js';
 import { groupRepository } from './group.repository.js';
 import { userRepository } from '../auth/user.repository.js';
+import { groupKeyService } from '../e2ee/groupKey.service.js';
 import { groupEventBus } from '../../realtime/groupEvents.js';
 import { GROUP_MAX_MEMBERS } from './group.model.js';
 import type { GroupDoc } from './group.model.js';
@@ -159,6 +160,7 @@ export const groupService = {
     }
     await groupRepository.removeMember(groupId, targetUserId);
     await groupRepository.incrementMemberCount(groupId, -1);
+    await groupKeyService.purgeMember(groupId, targetUserId);
     groupEventBus.emitMemberLeft(groupId, targetUserId);
   },
 
@@ -180,6 +182,7 @@ export const groupService = {
     }
     await groupRepository.removeMember(groupId, userId);
     await groupRepository.incrementMemberCount(groupId, -1);
+    await groupKeyService.purgeMember(groupId, userId);
     groupEventBus.emitMemberLeft(groupId, userId);
   },
 
@@ -190,6 +193,7 @@ export const groupService = {
     for (const memberId of memberIds) {
       await groupRepository.removeMember(groupId, memberId);
     }
+    await groupKeyService.purgeGroup(groupId);
     groupEventBus.emitDeleted(groupId, memberIds);
   },
 

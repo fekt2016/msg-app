@@ -12,7 +12,9 @@ export const groupIdParamSchema = z.object({
 
 export const senderKeyParamSchema = z.object({
   groupId: objectId,
-  senderId: z.string().min(1),
+  // `senderId` is a real user `_id` (an ObjectId ref on the envelope) — validate
+  // it here so a malformed value is a 422, not a Mongoose CastError → 500.
+  senderId: objectId,
 });
 
 export const senderKeyEnvelopeSchema = z.object({

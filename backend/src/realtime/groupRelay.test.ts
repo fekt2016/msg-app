@@ -5,6 +5,7 @@ import { createRealtimeServer } from './server.js';
 import { signAccessToken } from '../modules/auth/token.service.js';
 import type { RealtimeAdapter } from './adapter.js';
 import { MemoryPresenceStore } from './presence.js';
+import { groupEventBus } from './groupEvents.js';
 import { groupRepository } from '../modules/groups/group.repository.js';
 
 vi.mock('../modules/groups/group.repository.js', () => ({
@@ -178,6 +179,51 @@ describe('group realtime relay', () => {
       expect(received).toBe(false);
       member.disconnect();
       outsider.disconnect();
+    });
+  });
+
+  it('evicts a removed member so they can neither receive nor inject group ciphertext', async () => {
+    isMember.mockResolvedValue(true);
+    await withServer(async (port) => {
+      const alice = rawSocket(port, 'alice');
+      const bob = rawSocket(port, 'bob');
+      await Promise.all([waitForConnect(alice), waitForConnect(bob)]);
+      await Promise.all([subscribe(alice, GROUP), subscribe(bob, GROUP)]);
+
+      let bobReceived = false;
+      let aliceReceived = false;
+      bob.on('chat:group:message:new', () => {
+        bobReceived = true;
+      });
+      alice.on('chat:group:message:new', () => {
+        aliceReceived = true;
+      });
+
+      // Server-authoritative removal: bob is removed from the group. The event
+      // bus force-evicts bob's socket from `group:{id}`.
+      groupEventBus.emitMemberLeft(GROUP, 'bob');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      // Alice's message must not reach the evicted bob...
+      alice.emit('chat:group:message:new', {
+        groupId: GROUP,
+        ciphertext: 'c',
+        iv: 'i',
+        timestamp: 5,
+      });
+      // ...and bob (now roomless) must not be able to inject into the group.
+      bob.emit('chat:group:message:new', {
+        groupId: GROUP,
+        ciphertext: 'x',
+        iv: 'y',
+        timestamp: 6,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      expect(bobReceived).toBe(false);
+      expect(aliceReceived).toBe(false);
+      alice.disconnect();
+      bob.disconnect();
     });
   });
 

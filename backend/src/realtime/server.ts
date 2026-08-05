@@ -156,6 +156,9 @@ export async function createRealtimeServer(
     // a socket may only join `group:{groupId}` after `isMember` confirms it, so
     // being in the room is itself proof of membership — the message/ack relays
     // below therefore gate on `socket.rooms` rather than re-querying per event.
+    // The invariant is kept honest on the way out by `groupEventBus`, which
+    // force-evicts a member's sockets from the room when they leave, are removed,
+    // or the group is deleted (see realtime/groupEvents.ts).
     socket.on(REALTIME_EVENTS.GROUP_SUBSCRIBE, (raw: unknown) => {
       const parsed = groupSubscribeSchema.safeParse(raw);
       if (!parsed.success) {

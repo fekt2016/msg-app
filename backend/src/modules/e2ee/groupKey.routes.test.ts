@@ -14,7 +14,13 @@ vi.mock('../../modules/auth/token.service.js', () => ({
       err.name = 'JsonWebTokenError';
       throw err;
     }
-    return { sub: 'user-1', role: 'USER', deviceId: 'device-1', type: 'access' };
+    // `sub` must be an ObjectId — sender/recipient ids are ObjectId refs.
+    return {
+      sub: '5f5f5f5f5f5f5f5f5f5f5f01',
+      role: 'USER',
+      deviceId: 'device-1',
+      type: 'access',
+    };
   }),
   verifyRefreshToken: vi.fn(),
   hashToken: vi.fn((t: string) => `hashed-${t}`),
@@ -28,12 +34,14 @@ vi.mock('./groupSenderKey.repository.js', () => ({
     listSendersForRecipient: vi.fn(),
     deleteSenderKey: vi.fn(),
     deleteByGroup: vi.fn(),
+    deleteEnvelopesForRecipient: vi.fn(),
   },
 }));
 
 vi.mock('../groups/group.repository.js', () => ({
   groupRepository: {
     listMemberIds: vi.fn(),
+    isMember: vi.fn(),
   },
 }));
 
@@ -43,6 +51,9 @@ const groups = vi.mocked(groupRepositoryModule.groupRepository);
 const app = createApp();
 const AUTH = { Authorization: 'Bearer valid-token' };
 const GID = '5f5f5f5f5f5f5f5f5f5f5f5f';
+// The authenticated caller (matches the token mock's `sub`) and another member.
+const CALLER = '5f5f5f5f5f5f5f5f5f5f5f01';
+const OTHER = '5f5f5f5f5f5f5f5f5f5f5f02';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -50,13 +61,13 @@ beforeEach(() => {
 
 describe('POST /api/v1/e2ee/groups/:groupId/sender-keys', () => {
   it('stores sender-key envelopes and returns 201', async () => {
-    groups.listMemberIds.mockResolvedValue(['user-1', 'user-2']);
+    groups.listMemberIds.mockResolvedValue([CALLER, OTHER]);
     repo.upsertEnvelopes.mockResolvedValue({} as never);
 
     const res = await request(app)
       .post(`/api/v1/e2ee/groups/${GID}/sender-keys`)
       .set(AUTH)
-      .send({ envelopes: [{ recipientId: 'user-2', keyId: 3, ciphertext: 'abc', iv: 'def' }] });
+      .send({ envelopes: [{ recipientId: OTHER, keyId: 3, ciphertext: 'abc', iv: 'def' }] });
 
     expect(res.status).toBe(201);
     expect(res.body.success).toBe(true);
@@ -64,12 +75,12 @@ describe('POST /api/v1/e2ee/groups/:groupId/sender-keys', () => {
   });
 
   it('returns 403 when a non-member uploads into the group', async () => {
-    groups.listMemberIds.mockResolvedValue(['user-2', 'user-3']);
+    groups.listMemberIds.mockResolvedValue([OTHER, 'user-3']);
 
     const res = await request(app)
       .post(`/api/v1/e2ee/groups/${GID}/sender-keys`)
       .set(AUTH)
-      .send({ envelopes: [{ recipientId: 'user-2', keyId: 3, ciphertext: 'abc', iv: 'def' }] });
+      .send({ envelopes: [{ recipientId: OTHER, keyId: 3, ciphertext: 'abc', iv: 'def' }] });
 
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('NOT_GROUP_MEMBER');
@@ -115,41 +126,63 @@ describe('POST /api/v1/e2ee/groups/:groupId/sender-keys', () => {
 
 describe('GET /api/v1/e2ee/groups/:groupId/sender-keys', () => {
   it('lists senders that distributed a key to the caller', async () => {
+    groups.isMember.mockResolvedValue(true);
     repo.listSendersForRecipient.mockResolvedValue([
-      { senderId: 'user-1', keyId: 3, updatedAt: new Date() },
+      { senderId: OTHER, keyId: 3, updatedAt: new Date() },
     ]);
 
     const res = await request(app).get(`/api/v1/e2ee/groups/${GID}/sender-keys`).set(AUTH);
 
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
-    expect(repo.listSendersForRecipient).toHaveBeenCalledWith(GID, 'user-1');
+    expect(repo.listSendersForRecipient).toHaveBeenCalledWith(GID, CALLER);
+  });
+
+  it('returns 403 for a caller who is no longer a member', async () => {
+    groups.isMember.mockResolvedValue(false);
+
+    const res = await request(app).get(`/api/v1/e2ee/groups/${GID}/sender-keys`).set(AUTH);
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('NOT_GROUP_MEMBER');
+    expect(repo.listSendersForRecipient).not.toHaveBeenCalled();
   });
 });
 
 describe('GET /api/v1/e2ee/groups/:groupId/sender-keys/:senderId', () => {
   it('returns the caller envelope for a sender', async () => {
+    groups.isMember.mockResolvedValue(true);
     repo.findEnvelopeForRecipient.mockResolvedValue({
-      recipientId: 'user-1',
+      recipientId: CALLER,
       keyId: 3,
       ciphertext: 'abc',
       iv: 'def',
       createdAt: new Date(),
     });
 
-    const res = await request(app).get(`/api/v1/e2ee/groups/${GID}/sender-keys/user-9`).set(AUTH);
+    const res = await request(app).get(`/api/v1/e2ee/groups/${GID}/sender-keys/${OTHER}`).set(AUTH);
 
     expect(res.status).toBe(200);
-    expect(res.body.data.recipientId).toBe('user-1');
+    expect(res.body.data.recipientId).toBe(CALLER);
   });
 
   it('returns 404 when no envelope exists for the caller', async () => {
+    groups.isMember.mockResolvedValue(true);
     repo.findEnvelopeForRecipient.mockResolvedValue(null);
 
-    const res = await request(app).get(`/api/v1/e2ee/groups/${GID}/sender-keys/user-9`).set(AUTH);
+    const res = await request(app).get(`/api/v1/e2ee/groups/${GID}/sender-keys/${OTHER}`).set(AUTH);
 
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe('SENDER_KEY_NOT_FOUND');
+  });
+
+  it('rejects a senderId that is not an ObjectId (422, not a 500 CastError)', async () => {
+    const res = await request(app)
+      .get(`/api/v1/e2ee/groups/${GID}/sender-keys/not-an-object-id`)
+      .set(AUTH);
+
+    expect(res.status).toBe(422);
+    expect(repo.findEnvelopeForRecipient).not.toHaveBeenCalled();
   });
 });
 
@@ -157,22 +190,22 @@ describe('DELETE /api/v1/e2ee/groups/:groupId/sender-keys/:senderId', () => {
   it('deletes the caller own sender key', async () => {
     repo.deleteSenderKey.mockResolvedValue(undefined);
 
-    // Authenticated user is user-1 (see token mock), deleting user-1's own key.
+    // Authenticated caller is CALLER (see token mock), deleting their own key.
     const res = await request(app)
-      .delete(`/api/v1/e2ee/groups/${GID}/sender-keys/user-1`)
+      .delete(`/api/v1/e2ee/groups/${GID}/sender-keys/${CALLER}`)
       .set(AUTH);
 
     expect(res.status).toBe(200);
     expect(res.body.data.deleted).toBe(true);
-    expect(repo.deleteSenderKey).toHaveBeenCalledWith(GID, 'user-1');
+    expect(repo.deleteSenderKey).toHaveBeenCalledWith(GID, CALLER);
   });
 
   it('forbids deleting another member sender key', async () => {
     repo.deleteSenderKey.mockResolvedValue(undefined);
 
-    // Authenticated user is user-1, attempting to delete user-9's key.
+    // Authenticated caller is CALLER, attempting to delete OTHER's key.
     const res = await request(app)
-      .delete(`/api/v1/e2ee/groups/${GID}/sender-keys/user-9`)
+      .delete(`/api/v1/e2ee/groups/${GID}/sender-keys/${OTHER}`)
       .set(AUTH);
 
     expect(res.status).toBe(403);

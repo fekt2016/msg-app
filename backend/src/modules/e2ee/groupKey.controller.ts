@@ -1,7 +1,6 @@
 import type { Request, Response } from 'express';
 import { groupKeyService } from './groupKey.service.js';
 import { apiResponse, apiCreated } from '../../utils/apiResponse.js';
-import { AppError } from '../../errors/AppError.js';
 
 export const groupKeyController = {
   async uploadSenderKeys(req: Request, res: Response) {
@@ -27,12 +26,9 @@ export const groupKeyController = {
 
   async deleteSenderKey(req: Request, res: Response) {
     const { groupId, senderId } = req.params as { groupId: string; senderId: string };
-    // A member may only delete their OWN sender key. Without this check any
-    // authenticated user could delete any other member's group sender key.
-    if (senderId !== req.user!.id) {
-      throw new AppError(403, 'FORBIDDEN', 'You can only delete your own sender key');
-    }
-    await groupKeyService.deleteSenderKey(groupId, senderId);
+    // Ownership (a member may only delete their OWN sender key) is enforced in
+    // the service — the caller id is passed through for that check.
+    await groupKeyService.deleteSenderKey(groupId, senderId, req.user!.id);
     res.status(200).json(apiResponse({ deleted: true }));
   },
 };

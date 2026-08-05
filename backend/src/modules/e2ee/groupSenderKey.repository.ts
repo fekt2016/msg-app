@@ -116,4 +116,16 @@ export const groupSenderKeyRepository = {
   async deleteByGroup(groupId: string): Promise<void> {
     await GroupSenderKeyModel.deleteMany({ groupId }).exec();
   },
+
+  /**
+   * Removes every envelope addressed to `recipientId` across all senders in the
+   * group — used when a member leaves or is removed so the server stops serving
+   * them key material addressed while they were still a member.
+   */
+  async deleteEnvelopesForRecipient(groupId: string, recipientId: string): Promise<void> {
+    await GroupSenderKeyModel.updateMany(
+      { groupId },
+      { $pull: { envelopes: { recipientId } } },
+    ).exec();
+  },
 };
