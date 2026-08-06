@@ -22,6 +22,8 @@ export type AppStackParamList = {
   CreateCommunity: { identifier?: string } | undefined;
   GroupChat: { groupId: string; name: string };
   CreateGroup: undefined;
+  RecoveryKeySetup: undefined;
+  RestoreRecovery: undefined;
 };
 
 export type RootStackParamList = {

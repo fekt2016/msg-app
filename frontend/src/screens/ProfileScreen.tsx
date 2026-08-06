@@ -9,16 +9,20 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../auth/AuthContext';
 import { Button } from '../components/Button';
 import { FormField } from '../components/FormField';
 import { apiErrorMessage } from '../api/client';
 import { updateMyProfile, uploadAvatar } from '../api/users';
+import type { AppStackParamList } from '../navigation/types';
 import { colors, radius, spacing } from '../theme/tokens';
 
 export function ProfileScreen() {
   const { user, logout, refreshProfile } = useAuth();
+  const navigation = useNavigation<NativeStackNavigationProp<AppStackParamList>>();
 
   const [displayName, setDisplayName] = useState(user?.displayName ?? '');
   const [bio, setBio] = useState(user?.bio ?? '');
@@ -128,6 +132,28 @@ export function ProfileScreen() {
           Save profile
         </Button>
 
+        <View style={styles.securitySection}>
+          <Text style={styles.sectionTitle}>Security</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Set up recovery key"
+            onPress={() => navigation.navigate('RecoveryKeySetup')}
+            style={styles.securityRow}
+          >
+            <Text style={styles.securityRowText}>Recovery key backup</Text>
+            <Text style={styles.securityRowChevron}>›</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Restore from recovery phrase"
+            onPress={() => navigation.navigate('RestoreRecovery')}
+            style={styles.securityRow}
+          >
+            <Text style={styles.securityRowText}>Restore history from recovery phrase</Text>
+            <Text style={styles.securityRowChevron}>›</Text>
+          </Pressable>
+        </View>
+
         <Pressable accessibilityRole="button" onPress={() => void logout()} style={styles.logout}>
           <Text style={styles.logoutText}>Log out</Text>
         </Pressable>
@@ -226,6 +252,36 @@ const styles = StyleSheet.create({
   success: {
     color: colors.kenteGold,
     fontSize: 14,
+  },
+  securitySection: {
+    marginTop: spacing.sm,
+    gap: spacing.xs,
+  },
+  sectionTitle: {
+    color: colors.savannaMuted,
+    fontSize: 13,
+    fontWeight: '600',
+    letterSpacing: 1,
+    marginBottom: spacing.xs,
+  },
+  securityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.inputSurface,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  securityRowText: {
+    color: colors.savanna,
+    fontSize: 15,
+    flex: 1,
+  },
+  securityRowChevron: {
+    color: colors.kenteGold,
+    fontSize: 20,
+    fontWeight: '700',
   },
   logout: {
     marginTop: spacing.sm,

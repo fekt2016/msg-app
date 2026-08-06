@@ -2,6 +2,7 @@ import * as SecureStore from 'expo-secure-store';
 import { generateE2eeKeys, getPublicKeyBundle } from './crypto';
 import { keyStore } from './keyStore';
 import { uploadKeyBundle } from './e2eeApi';
+import type { E2eeKeyBundle } from './types.js';
 
 const BUNDLE_OWNER_KEY = 'e2ee_bundle_owner_user';
 const UPLOAD_ATTEMPTS = 3;
@@ -66,4 +67,20 @@ export async function ensureE2eeKeysRegistered(userId: string): Promise<void> {
     await uploadWithRetry(getPublicKeyBundle(bundle));
     await SecureStore.setItemAsync(uploadedFlagFor(userId), 'true');
   }
+}
+
+/**
+ * Installs a bundle restored from a recovery backup as the current user's
+ * on-device identity: persists it, claims device ownership for `userId` (so a
+ * later ensureE2eeKeysRegistered does NOT regenerate over it), and re-publishes
+ * the unchanged public keys. Re-uploading is idempotent — the server already
+ * holds these public keys — but it re-marks any peer who saw a stale/absent
+ * bundle. Restoring the identity is what makes the server's stored ciphertext
+ * history decryptable again on the new device.
+ */
+export async function restoreE2eeKeys(userId: string, bundle: E2eeKeyBundle): Promise<void> {
+  await keyStore.saveKeyBundle(bundle);
+  await SecureStore.setItemAsync(BUNDLE_OWNER_KEY, userId);
+  await uploadWithRetry(getPublicKeyBundle(bundle));
+  await SecureStore.setItemAsync(uploadedFlagFor(userId), 'true');
 }
