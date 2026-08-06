@@ -7,7 +7,7 @@ module.exports = {
   testMatch: ['**/__tests__/**/*.test.ts?(x)', '**/?(*.)+(test).ts?(x)'],
   setupFiles: ['<rootDir>/jest.setup.ts'],
   transformIgnorePatterns: [
-    'node_modules/(?!((jest-)?react-native|@react-native(-community)?|@nozbe)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|@noble/.*)',
+    'node_modules/(?!((jest-)?react-native|@react-native(-community)?|@nozbe)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|@noble/.*|@scure/.*)',
   ],
   collectCoverageFrom: ['src/**/*.{ts,tsx}', 'App.tsx', '!**/*.test.ts?(x)'],
   coverageProvider: 'v8',

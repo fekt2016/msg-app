@@ -111,7 +111,7 @@ Private 1:1 chat is fully E2EE (Signal-Protocol-style: `backend/src/modules/e2ee
 Binding downstream consequences:
 
 - Server-side search and AI features (message summary, smart reply — Phase 5) can **never** operate on private-chat plaintext. They must run on-device, or be scoped to non-encrypted surfaces (Channels/Communities).
-- Message backup requires a user-held recovery key (recovery phrase, Signal-style) — a lost device without one means lost history. This is in-scope for Phase 1, not optional polish (currently unbuilt — see `.opencode/TASKS.md`).
+- Message backup requires a user-held recovery key (recovery phrase, Signal-style) — a lost device without one means lost history. This is in-scope for Phase 1, not optional polish. Implemented server-blind (backend + mobile + tests done, pending Security/Code review + merge): a 24-word BIP39 phrase → Argon2id → AES-256-GCM over the on-device identity bundle; the server stores an opaque ciphertext blob only. Backs up the identity bundle alone, which suffices to recover history **only while 1:1 has no forward secrecy** — see ADR 0003 and `.opencode/TASKS.md`. Revisit scope at the X3DH milestone.
 
 ### Frontend: feature-based, offline-first
 
@@ -144,7 +144,7 @@ Requirements → Architecture Review → Database Design (skip if no schema chan
 | Phase                      | Scope                                                                                                              | Status                                                                                                                            |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
 | 0 — Foundation             | Monorepo, workspaces, Docker, CI, env validation, lint/format/hooks, Swagger, test frameworks, offline DB scaffold | Done                                                                                                                              |
-| 1 — Core Messaging         | Auth (OTP), profiles, E2EE 1:1 + group key-distribution + recovery-key backup, private/group chat, Socket.IO+Redis | In progress — see `.opencode/TASKS.md` for exact remaining items (group chat UI, recovery-key flow)                               |
+| 1 — Core Messaging         | Auth (OTP), profiles, E2EE 1:1 + group key-distribution + recovery-key backup, private/group chat, Socket.IO+Redis | In progress — see `.opencode/TASKS.md` for exact remaining items (recovery-key flow in review; 1:1 forward secrecy)               |
 | 2 — Community Features     | Search (Typesense, decided), object storage decision, Communities, Channels, Stories, push notifications           | In progress (Communities backend complete, mobile partial)                                                                        |
 | 3 — Marketplace & Payments | Products/orders/inventory, business pages, Paystack checkout, idempotent webhooks, seller KYC                      | Pending — design fully specified in `.opencode/DATABASE_DESIGN.md` and the marketplace skills (§14), nothing built yet            |
 | 4 — Realtime Calls         | WebRTC signaling + TURN/STUN, voice, video                                                                         | Pending (deliberately sequenced after Marketplace — TURN infra is slower to get right, and Marketplace/Payments generate revenue) |
