@@ -48,9 +48,10 @@ export const recoveryBackupService = {
     return { exists: Boolean(doc), updatedAt: doc?.updatedAt ?? null };
   },
 
-  /** Disables (soft-deletes) the caller's backup. Idempotent. */
-  async remove(userId: string): Promise<void> {
+  /** Disables (soft-deletes) the caller's backup. Idempotent; true if one was active. */
+  async remove(userId: string): Promise<boolean> {
     const removed = await recoveryBackupRepository.softDelete(userId);
     logger.info({ userId, removed }, 'E2EE recovery backup disabled');
+    return removed;
   },
 };

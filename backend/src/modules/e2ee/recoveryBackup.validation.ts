@@ -15,7 +15,7 @@ const base64 = (max: number) =>
  */
 export const recoveryKdfSchema = z.object({
   algorithm: z.literal('argon2id'),
-  // 8 MiB .. 1 GiB — covers the tuned mobile default (64 MiB) with headroom.
+  // 8 MiB .. 1 GiB — covers the tuned mobile default (19 MiB) with headroom.
   memoryKiB: z.number().int().min(8192).max(1048576),
   iterations: z.number().int().min(1).max(10),
   parallelism: z.number().int().min(1).max(4),

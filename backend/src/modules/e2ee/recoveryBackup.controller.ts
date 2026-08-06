@@ -21,7 +21,7 @@ export const recoveryBackupController = {
   },
 
   async remove(req: Request, res: Response) {
-    await recoveryBackupService.remove(req.user!.id);
-    res.status(200).json(apiResponse({ deleted: true }));
+    const deleted = await recoveryBackupService.remove(req.user!.id);
+    res.status(200).json(apiResponse({ deleted }));
   },
 };

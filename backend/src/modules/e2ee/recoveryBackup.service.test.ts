@@ -78,11 +78,17 @@ describe('recoveryBackupService.status', () => {
 });
 
 describe('recoveryBackupService.remove', () => {
-  it('soft-deletes via the repository', async () => {
+  it('soft-deletes via the repository and returns whether one was active', async () => {
     repo.softDelete.mockResolvedValue(true);
 
-    await recoveryBackupService.remove('user-1');
+    await expect(recoveryBackupService.remove('user-1')).resolves.toBe(true);
 
     expect(repo.softDelete).toHaveBeenCalledWith('user-1');
+  });
+
+  it('returns false when there was no active backup', async () => {
+    repo.softDelete.mockResolvedValue(false);
+
+    await expect(recoveryBackupService.remove('user-1')).resolves.toBe(false);
   });
 });

@@ -147,13 +147,22 @@ describe('GET /api/v1/e2ee/recovery/status', () => {
 });
 
 describe('DELETE /api/v1/e2ee/recovery', () => {
-  it('disables the backup (200) and is idempotent', async () => {
-    repo.softDelete.mockResolvedValue(false);
+  it('disables an active backup (200, deleted=true)', async () => {
+    repo.softDelete.mockResolvedValue(true);
 
     const res = await request(app).delete('/api/v1/e2ee/recovery').set(AUTH);
 
     expect(res.status).toBe(200);
     expect(res.body.data.deleted).toBe(true);
     expect(repo.softDelete).toHaveBeenCalledWith('user-1');
+  });
+
+  it('is idempotent when nothing was active (200, deleted=false)', async () => {
+    repo.softDelete.mockResolvedValue(false);
+
+    const res = await request(app).delete('/api/v1/e2ee/recovery').set(AUTH);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.deleted).toBe(false);
   });
 });

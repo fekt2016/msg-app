@@ -79,8 +79,14 @@ export async function ensureE2eeKeysRegistered(userId: string): Promise<void> {
  * history decryptable again on the new device.
  */
 export async function restoreE2eeKeys(userId: string, bundle: E2eeKeyBundle): Promise<void> {
-  await keyStore.saveKeyBundle(bundle);
+  // Claim device ownership BEFORE persisting the bundle. If the app is killed
+  // between these awaits, the next ensureE2eeKeysRegistered must not find a
+  // bundle whose owner still mismatches `userId` and regenerate a fresh identity
+  // over the just-restored one (silently destroying recoverable history). With
+  // this order the worst case is a missing/stale bundle — retryable — never an
+  // overwrite of the good restored bundle.
   await SecureStore.setItemAsync(BUNDLE_OWNER_KEY, userId);
+  await keyStore.saveKeyBundle(bundle);
   await uploadWithRetry(getPublicKeyBundle(bundle));
   await SecureStore.setItemAsync(uploadedFlagFor(userId), 'true');
 }
