@@ -86,3 +86,10 @@ just "backend done."
 - [ ] Performance/load testing (full pass — lighter passes also run after Phase 1 and Phase 4)
 - [ ] App Store / Play Store releases
 - [ ] Production deployment, monitoring, logging, backups
+
+## Cross-cutting: Security & API hardening (tech debt)
+
+Project-wide items surfaced by feature reviews that are not owned by any single feature. Tracked here so they aren't re-discovered per-PR.
+
+- [ ] **Redis-backed rate-limit store** — `express-rate-limit` currently uses the default in-memory store (`backend/src/app.ts`), so limits do **not** hold across instances as CLAUDE.md §11 / §12 prescribe ("Redis-backed so limits hold across instances"). Also no dedicated per-tier limiter on several authenticated endpoints; e.g. the E2EE recovery endpoints ride only the global limiter. Acceptable today (single instance; the recovery GET blob is cryptographically opaque without the 256-bit phrase the server never holds), but must be wired before any multi-instance/production deploy (Phase 7). Surfaced by the recovery-key security review (2026-08-06) and pre-existing before it. See ENGINEERING_RULES.md §6.
+- [ ] **`validate.ts` strips unknown fields instead of rejecting them** — CLAUDE.md §8 states "unknown fields rejected by default," but `middleware/validate.ts` uses Zod object `.parse()`, which silently strips unknown keys rather than 422-ing. Confirmed non-exploitable (server-side `req.user.id` always wins; stripped `userId`/`deletedAt` never reach any repository), so this is a convention-alignment/defense-in-depth fix, not a live vulnerability. Options: switch the shared schemas/middleware to `.strict()` (reject) or formally amend the §8 wording to "stripped." Route to `architect`/`code-reviewer` for the convention call, then `backend` to implement. Surfaced by the recovery-key security review (2026-08-06); applies project-wide.
