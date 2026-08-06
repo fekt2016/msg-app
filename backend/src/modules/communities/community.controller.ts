@@ -74,7 +74,7 @@ export const communityController = {
   async listMembers(req: Request, res: Response) {
     const identifier = String(req.params.identifier);
     const { page, pageSize } = req.query as unknown as { page: number; pageSize: number };
-    const result = await communityService.listMembers(identifier, page, pageSize);
+    const result = await communityService.listMembers(identifier, req.user?.id, page, pageSize);
     res.status(200).json(
       apiResponse(result.items, {
         page: result.page,

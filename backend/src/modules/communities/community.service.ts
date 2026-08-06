@@ -3,6 +3,7 @@ import { communityRepository } from './community.repository.js';
 import type { MemberRole } from './communityMember.model.js';
 import { searchProvider } from '../search/typesense.js';
 import { communityEventBus } from '../../realtime/communityEvents.js';
+import { logger } from '../../config/logger.js';
 import type { CommunityDoc } from './community.model.js';
 
 export interface SafeCommunity {
@@ -141,7 +142,8 @@ export const communityService = {
       const byId = new Map(communities.map((c) => [c._id.toString(), toSafeCommunity(c)]));
       const items = ids.map((id) => byId.get(id)).filter((c): c is SafeCommunity => Boolean(c));
       return { items, total: result.found, page: result.page, pageSize: result.perPage };
-    } catch {
+    } catch (err) {
+      logger.warn({ err }, 'community search failed; falling back to database listing');
       const result = await communityRepository.findVisible(page, pageSize);
       return {
         items: result.items.map(toSafeCommunity),
@@ -162,6 +164,10 @@ export const communityService = {
     if (viewerId) {
       const member = await communityRepository.findMember(community._id.toString(), viewerId);
       role = member?.role ?? null;
+    }
+
+    if (community.visibility === 'PRIVATE' && role === null) {
+      throw new AppError(403, 'PRIVATE_COMMUNITY', 'This community is private');
     }
 
     return { ...toSafeCommunity(community), isMember: role !== null, role };
@@ -201,10 +207,7 @@ export const communityService = {
   },
 
   async join(userId: string, identifier: string): Promise<CommunityWithMembership> {
-    const community = await this.getByIdOrSlug(identifier);
-    if (community.visibility === 'PRIVATE') {
-      throw new AppError(403, 'PRIVATE_COMMUNITY', 'This community is private');
-    }
+    const community = await this.getByIdOrSlug(identifier, userId);
     const existing = await communityRepository.findMember(community.id, userId);
     if (existing) {
       return { ...community, isMember: true, role: existing.role };
@@ -216,7 +219,7 @@ export const communityService = {
   },
 
   async leave(userId: string, identifier: string): Promise<CommunityWithMembership> {
-    const community = await this.getByIdOrSlug(identifier);
+    const community = await this.getByIdOrSlug(identifier, userId);
     const existing = await communityRepository.findMember(community.id, userId);
     if (!existing) {
       return { ...community, isMember: false, role: null };
@@ -264,8 +267,13 @@ export const communityService = {
     communityEventBus.emitRoleUpdated(community.id, targetUserId, role);
   },
 
-  async listMembers(identifier: string, page: number, pageSize: number) {
-    const community = await this.getByIdOrSlug(identifier);
+  async listMembers(
+    identifier: string,
+    viewerId: string | undefined,
+    page: number,
+    pageSize: number,
+  ) {
+    const community = await this.getByIdOrSlug(identifier, viewerId);
     const result = await communityRepository.listMembers(community.id, page, pageSize);
     return {
       items: result.items,

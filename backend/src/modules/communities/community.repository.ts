@@ -145,8 +145,8 @@ export const communityRepository = {
     ]);
 
     const userIds = members.map((m) => m.userId.toString());
-    const found = await Promise.all(userIds.map((id) => userRepository.findById(id)));
-    const users = new Map(found.filter((u) => u).map((u) => [u!._id.toString(), u!]));
+    const found = await userRepository.findByIds(userIds);
+    const users = new Map(found.map((u) => [u._id.toString(), u]));
 
     const items = members.map((member) => {
       const user = users.get(member.userId.toString());

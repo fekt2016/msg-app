@@ -203,6 +203,26 @@ describe('communityService.getByIdOrSlug', () => {
       code: 'COMMUNITY_NOT_FOUND',
     });
   });
+
+  it('forbids non-members from viewing a private community', async () => {
+    repo.findByIdOrSlug.mockResolvedValue(fakeCommunity({ visibility: 'PRIVATE' }));
+    repo.findMember.mockResolvedValue(null);
+
+    await expect(communityService.getByIdOrSlug('secret', 'user-9')).rejects.toMatchObject({
+      code: 'PRIVATE_COMMUNITY',
+      statusCode: 403,
+    });
+  });
+
+  it('allows members to view a private community', async () => {
+    repo.findByIdOrSlug.mockResolvedValue(fakeCommunity({ visibility: 'PRIVATE' }));
+    repo.findMember.mockResolvedValue({ role: 'MEMBER' });
+
+    const result = await communityService.getByIdOrSlug('secret', 'user-2');
+
+    expect(result.isMember).toBe(true);
+    expect(result.visibility).toBe('PRIVATE');
+  });
 });
 
 describe('communityService.update', () => {
@@ -368,9 +388,19 @@ describe('communityService.listMembers', () => {
       pageSize: 20,
     });
 
-    const result = await communityService.listMembers('accra-tech', 1, 20);
+    const result = await communityService.listMembers('accra-tech', 'user-1', 1, 20);
 
     expect(repo.listMembers).toHaveBeenCalledWith('community-1', 1, 20);
     expect(result.items).toHaveLength(1);
+  });
+
+  it('forbids non-members from listing a private community members', async () => {
+    repo.findByIdOrSlug.mockResolvedValue(fakeCommunity({ visibility: 'PRIVATE' }));
+    repo.findMember.mockResolvedValue(null);
+
+    await expect(communityService.listMembers('secret', 'user-9', 1, 20)).rejects.toMatchObject({
+      code: 'PRIVATE_COMMUNITY',
+      statusCode: 403,
+    });
   });
 });
