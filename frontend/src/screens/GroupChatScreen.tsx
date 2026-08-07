@@ -136,20 +136,35 @@ export function GroupChatScreen({ route, navigation }: Props) {
     );
   }, [nameByUser]);
 
-  // Distribute the caller's sender key to the current roster once it is known,
-  // and re-distribute whenever the roster changes (idempotent for existing
-  // members, delivering the key to anyone newly added).
-  const distributedSigRef = useRef<string>('');
+  // Keep the caller's sender key distributed to the current roster, and — per
+  // ADR 0004 (forward-only group history) — ROTATE it whenever a new member
+  // appears. A newly-added member must only receive the post-join key: handing
+  // them the existing key would let them decrypt persisted pre-join messages
+  // (which stay under the old keyId). Mirrors the member-leave rotation. The
+  // initial bootstrap and roster shrinks just (re)distribute the current key
+  // (departed-member forward secrecy is handled by the member-left rotation).
+  const knownRosterRef = useRef<string[] | null>(null);
   useEffect(() => {
     if (!currentUserId || memberIds.length === 0) return;
-    const sig = [...memberIds].sort().join(',');
-    if (sig === distributedSigRef.current) return;
-    distributedSigRef.current = sig;
-    void ensureOwnSenderKeyDistributed(groupId, memberIds, currentUserId).catch(() => {
-      // Most often this is the caller's own key bundle not being ready yet (see
+    const sorted = [...memberIds].sort();
+    const prev = knownRosterRef.current;
+    if (prev && prev.length === sorted.length && prev.every((id, i) => id === sorted[i])) return;
+    const added = prev ? sorted.filter((id) => !prev.includes(id)) : [];
+    knownRosterRef.current = sorted;
+
+    const distribute =
+      added.length > 0
+        ? rotateOwnSenderKey(groupId, memberIds, currentUserId)
+        : ensureOwnSenderKeyDistributed(groupId, memberIds, currentUserId);
+
+    void distribute.catch((err) => {
+      // Most often the caller's own key bundle isn't ready yet (see
       // ensureE2eeKeysRegistered) — allow a retry on the next roster change
       // rather than latching a permanent failure.
-      distributedSigRef.current = '';
+      knownRosterRef.current = null;
+      if (added.length > 0) {
+        console.error('[group-e2ee] sender-key rotation after member-join failed:', err);
+      }
       setSessionError('Your group encryption keys are still being set up. Try again in a moment.');
     });
   }, [groupId, memberIds, currentUserId]);

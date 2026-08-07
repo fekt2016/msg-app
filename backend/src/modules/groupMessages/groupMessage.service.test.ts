@@ -72,9 +72,10 @@ describe('groupMessageService.storeMessage', () => {
 });
 
 describe('groupMessageService.listGroupMessages', () => {
-  it('lists history for an existing group member', async () => {
+  it('lists history for an existing group member, scoped to their join time', async () => {
+    const joinedAt = new Date('2026-02-03T00:00:00.000Z');
     groups.findById.mockResolvedValue({ _id: 'group-1' } as never);
-    groups.findMember.mockResolvedValue({ userId: 'viewer' } as never);
+    groups.findMember.mockResolvedValue({ userId: 'viewer', joinedAt } as never);
     repo.listByGroup.mockResolvedValue({
       items: [stored],
       total: 1,
@@ -84,7 +85,8 @@ describe('groupMessageService.listGroupMessages', () => {
 
     const result = await groupMessageService.listGroupMessages('viewer', 'group-1', 1, 20);
     expect(result.items).toEqual([stored]);
-    expect(repo.listByGroup).toHaveBeenCalledWith('group-1', 1, 20);
+    // Forward-only (ADR 0004): the caller's joinedAt is the history cutoff.
+    expect(repo.listByGroup).toHaveBeenCalledWith('group-1', 1, 20, joinedAt);
   });
 
   it('throws 404 when the group does not exist', async () => {

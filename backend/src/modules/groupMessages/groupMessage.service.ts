@@ -37,6 +37,10 @@ export const groupMessageService = {
   /**
    * Lists a group's message history, newest first, paginated. Only members can
    * read history (private group); the group must still exist (not soft-deleted).
+   * Per ADR 0004 the history is scoped to the caller's `joinedAt` — a member
+   * cannot read messages sent before they joined (forward-only). On rejoin the
+   * membership row carries the latest `joinedAt`, so the window is the most
+   * recent join.
    */
   async listGroupMessages(viewerId: string, groupId: string, page: number, pageSize: number) {
     const group = await groupRepository.findById(groupId);
@@ -47,6 +51,6 @@ export const groupMessageService = {
     if (!member) {
       throw new AppError(403, 'NOT_GROUP_MEMBER', 'You are not a member of this group');
     }
-    return groupMessageRepository.listByGroup(groupId, page, pageSize);
+    return groupMessageRepository.listByGroup(groupId, page, pageSize, member.joinedAt);
   },
 };

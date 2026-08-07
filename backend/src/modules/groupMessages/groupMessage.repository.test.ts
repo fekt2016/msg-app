@@ -57,20 +57,27 @@ describe('groupMessageRepository.create', () => {
 });
 
 describe('groupMessageRepository.listByGroup', () => {
-  it('queries per group, newest first, with pagination', async () => {
-    mockModel.find.mockReturnValue({
-      sort: () => ({
-        skip: () => ({
-          limit: () => execChain([doc()]),
-        }),
+  const since = new Date('2026-01-01T00:00:00.000Z');
+
+  it('queries per group from the join cutoff, newest first, with pagination', async () => {
+    const sortSpy = vi.fn(() => ({
+      skip: () => ({
+        limit: () => execChain([doc()]),
       }),
-    });
+    }));
+    mockModel.find.mockReturnValue({ sort: sortSpy });
     mockModel.countDocuments.mockResolvedValue(1);
 
-    const result = await groupMessageRepository.listByGroup('group-1', 1, 20);
+    const result = await groupMessageRepository.listByGroup('group-1', 1, 20, since);
 
-    expect(mockModel.find).toHaveBeenCalledWith({ groupId: 'group-1' });
-    expect(mockModel.countDocuments).toHaveBeenCalledWith({ groupId: 'group-1' });
+    // Scoped to the caller's joinedAt and ordered by server createdAt (ADR 0004),
+    // never the forgeable client timestamp.
+    expect(mockModel.find).toHaveBeenCalledWith({ groupId: 'group-1', createdAt: { $gte: since } });
+    expect(mockModel.countDocuments).toHaveBeenCalledWith({
+      groupId: 'group-1',
+      createdAt: { $gte: since },
+    });
+    expect(sortSpy).toHaveBeenCalledWith({ createdAt: -1, _id: -1 });
     expect(result).toEqual({
       items: [
         {
@@ -99,7 +106,7 @@ describe('groupMessageRepository.listByGroup', () => {
     });
     mockModel.countDocuments.mockResolvedValue(0);
 
-    const result = await groupMessageRepository.listByGroup('group-1', 1, 20);
+    const result = await groupMessageRepository.listByGroup('group-1', 1, 20, since);
     expect(result.items).toEqual([]);
     expect(result.total).toBe(0);
   });

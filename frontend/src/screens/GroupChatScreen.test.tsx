@@ -87,6 +87,38 @@ describe('GroupChatScreen', () => {
     );
   });
 
+  it('rotates the sender key when a new member joins, without re-sharing the old key (ADR 0004)', async () => {
+    const { view, navigation } = await renderScreen();
+    await waitFor(() =>
+      expect(mockSession.ensureOwnSenderKeyDistributed).toHaveBeenCalledWith(
+        'g1',
+        ['me', 'u2'],
+        'me',
+      ),
+    );
+
+    // A third member is added to the roster.
+    mockUseMembers.mockReturnValue({
+      data: {
+        items: [
+          { userId: 'me', displayName: 'Me' },
+          { userId: 'u2', displayName: 'Bob' },
+          { userId: 'u3', displayName: 'Ama' },
+        ],
+      },
+    });
+    await act(async () => {
+      view.rerender(screenElement(navigation));
+    });
+
+    // Forward-only: the newcomer must only get the post-join key, so we rotate
+    // to the new roster rather than distributing the existing key again.
+    await waitFor(() =>
+      expect(mockSession.rotateOwnSenderKey).toHaveBeenCalledWith('g1', ['me', 'u2', 'u3'], 'me'),
+    );
+    expect(mockSession.ensureOwnSenderKeyDistributed).toHaveBeenCalledTimes(1);
+  });
+
   it('encrypts and emits a message on send', async () => {
     mockSession.encryptGroupMessage.mockResolvedValue({ ciphertext: 'ct', iv: 'iv', keyId: 3 });
     await renderScreen();
