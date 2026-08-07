@@ -1,6 +1,6 @@
 # Phase 1 — 1:1 Chat + Group Chat: Code Review
 
-**Status:** Review — all blocking bugs (F1–F3, R1–R3), notes N1/N2/N6, and the security HIGH (ADR 0004 forward-only history) fixed; pending code-review + security re-verify, then merge.
+**Status:** Review complete — security re-verify (HIGH cleared) + code review (APPROVE, no blocking/high) both signed off; merge-ready once the GitHub CI run is confirmed green.
 **Scope:** 1:1 E2EE chat (ChatScreen) + group sender-key chat (GroupChatScreen), messages API, realtime relay.
 **Date:** 2026-08-06
 **Checklist source:** `.claude/skills/eaz-code-review/SKILL.md` + `CLAUDE.md` §7 (Definition of Done).
