@@ -1,6 +1,14 @@
 module.exports = {
   preset: 'jest-expo',
   testEnvironment: 'node',
+  // The heavy screen/E2EE suites (ChatScreen, GroupChatScreen, HomeScreen) run
+  // real crypto mocks + many async `waitFor`s under v8 coverage instrumentation.
+  // With unbounded workers (jest's default = one per core) on a busy CI runner,
+  // those tests starve the event loop and exceed the 5000ms default timeout —
+  // flaky in CI, green in isolation. Cap parallelism to halve contention and
+  // give each test real headroom so the run is deterministic everywhere.
+  maxWorkers: '50%',
+  testTimeout: 15000,
   moduleNameMapper: {
     '^@nozbe/watermelondb/adapters/sqlite$': '<rootDir>/src/db/testing/sqliteStub.ts',
   },

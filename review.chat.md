@@ -28,7 +28,7 @@
 
 ## 2. Verdict
 
-**Merge-ready pending CI confirmation.** All blocking bugs (F1–F3, R1–R3), the notes (N1/N2/N6), the security HIGH+LOW (§10, ADR 0004 forward-only + `createdAt` sort), and the actionable code-review nits (§11 L3/L4/L5) are fixed with regression tests. **Security re-verify: HIGH cleared.** **Code review: APPROVE, no blocking/high.** `lint`/`typecheck` clean; full suite green (backend 330/330, frontend 189/189 at `--maxWorkers=2`; the two heavy screen suites time out only under unbounded parallel load — an unrelated, pre-existing test-runner flake). Deferred (documented, not blocking): N3 (load-more/pagination), N4 (shared envelope types), N5 (`ciphertext` field naming), N7 (recipient-exists relay guard), L1 (persist-path dedup index), L2 (live-handler dedup, with N6), L6 (collection-name normalization → refactoring), `page` deep-skip → performance. **CI gate waived by repo owner (2026-08-07):** rather than block on the GitHub Actions run, all four checks CI runs were reproduced locally and are green — `pnpm -r lint`, `pnpm -r typecheck`, `pnpm -r test` (backend 330/330, frontend 189/189), and `pnpm -r build` (backend `tsc` + frontend Expo web/ios/android export). This is a deliberate deviation from CLAUDE.md §16's "required status check" — noted here so the waiver is on record, not silent. **Ready to merge.**
+**Merge-ready pending CI confirmation.** All blocking bugs (F1–F3, R1–R3), the notes (N1/N2/N6), the security HIGH+LOW (§10, ADR 0004 forward-only + `createdAt` sort), and the actionable code-review nits (§11 L3/L4/L5) are fixed with regression tests. **Security re-verify: HIGH cleared.** **Code review: APPROVE, no blocking/high.** `lint`/`typecheck`/`build` clean; full suite green (backend 330/330, frontend 189/189). Deferred (documented, not blocking): N3 (load-more/pagination), N4 (shared envelope types), N5 (`ciphertext` field naming), N7 (recipient-exists relay guard), L1 (persist-path dedup index), L2 (live-handler dedup, with N6), L6 (collection-name normalization → refactoring), `page` deep-skip → performance. **CI flake fixed (2026-08-07):** the first GitHub Actions run failed — the two heavy screen suites (`ChatScreen`, `HomeScreen`) exceeded jest's 5000ms default timeout under CI's unbounded-worker + coverage load (green in isolation / at `--maxWorkers=2`, so a runner-contention flake, not a code fault). Fixed at the config level in `frontend/jest.config.js` (`maxWorkers: '50%'` + `testTimeout: 15000`), verified deterministic across repeated full `pnpm test` runs. **Ready to merge once CI re-runs green.**
 
 ---
 
@@ -118,9 +118,9 @@ The server relays `chat:message:new` to the recipient's own room (`io.to('user:'
 - [x] **R2** merge ordering (fixed with R1)
 - [x] **R3** conversation-scoped incoming filter (fixed + regression test)
 - [x] **N1** full-text message rendering (fixed)
-- [x] `pnpm lint` / `pnpm typecheck` / `pnpm test` / `pnpm build` green both workspaces — backend 330/330, frontend 189/189 (heavy screen suites time out only under full-parallel load; green isolated and at `--maxWorkers=2`)
+- [x] `pnpm lint` / `pnpm typecheck` / `pnpm test` / `pnpm build` green both workspaces — backend 330/330, frontend 189/189 (CI-parallelism timeout flake fixed in `frontend/jest.config.js`: `maxWorkers: '50%'` + `testTimeout: 15000`)
 - [x] Documentation/`.opencode/TASKS.md` updated for the fixed + remaining items
-- [~] CI status check — **waived by repo owner**; all four CI checks reproduced green locally (see §2)
+- [ ] CI status check — first run failed on the jest timeout flake (now fixed + pushed); pending green re-run
 - [ ] Merged (branch pushed; PR opened manually)
 
 ---
@@ -132,7 +132,7 @@ The server relays `chat:message:new` to the recipient's own room (`io.to('user:'
 3. ~~N1 (full message text).~~ **Done** — truncation slice removed.
 4. ~~Group-chat history — no fetch existed.~~ **Done** — new `groupMessages` module + `useGroupMessages` + merge effect + regression test.
 5. ~~N2 (history error state) + N6 (swallowed `rotateOwnSenderKey` error).~~ **Done** — both screens surface a history-fetch error hint; the rotation failure is logged. N3/N4/N5/N7 deferred (documented).
-6. `pnpm lint` / `pnpm typecheck` clean; test suites green (see §8), then final security/code-review sign-off and merge. **Separately investigate the pre-existing full-parallel test-runner timeout flake** (heavy screen suites) — not a blocker for this change but worth a `--maxWorkers` cap in CI.
+6. ~~Investigate the full-parallel test-runner timeout flake (heavy screen suites) — worth a `--maxWorkers` cap in CI.~~ **Done** — CI's first run failed on exactly this; fixed in `frontend/jest.config.js` (`maxWorkers: '50%'` + `testTimeout: 15000`), verified deterministic. All sign-offs in; merge once CI re-runs green.
 7. **Emulator smoke test blocked by host memory pressure:** both `-read-only` emulators (5554, 5556) were relaunched with the new bundle, but the app process is silently OOM-killed (~40s after launch, no crash/redbox in logcat — LMK, not a JS error) because 2 emulators + Metro + backend exceed the 16 GB host. CI + the green suites remain the verification signal; re-smoke-test on a host with more headroom or one emulator at a time before the "Merged" box.
 8. ~~Security audit of the new persistence surface.~~ **Done** — see §10. One HIGH (forward-only history) resolved via ADR 0004 with both enforcement layers landed; LOW ordering-forgery folded into the `createdAt` sort.
 
