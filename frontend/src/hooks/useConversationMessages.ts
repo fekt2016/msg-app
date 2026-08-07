@@ -11,5 +11,8 @@ export function useConversationMessages(userId: string, options: { enabled?: boo
     queryKey: messageKeys.conversation(userId),
     queryFn: () => listConversationMessages(userId),
     enabled: options.enabled ?? true,
+    // Always refetch on mount so re-entering a chat screen reloads the latest
+    // history instead of serving a stale cached page.
+    refetchOnMount: 'always',
   });
 }

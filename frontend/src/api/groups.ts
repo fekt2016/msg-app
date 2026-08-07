@@ -42,6 +42,16 @@ export interface Paginated<T> {
   pageSize: number;
 }
 
+export interface GroupMessage {
+  id: string;
+  groupId: string;
+  senderId: string;
+  keyId: number;
+  ciphertext: string;
+  iv: string;
+  timestamp: number;
+}
+
 export interface CreateGroupInput {
   name: string;
   memberIds?: string[];
@@ -67,6 +77,17 @@ export async function listGroupMembers(
   params: { page?: number; pageSize?: number } = {},
 ): Promise<Paginated<GroupMember>> {
   const res = await apiClient.get<ApiEnvelope<GroupMember[]>>(`/groups/${groupId}/members`, {
+    params,
+  });
+  const meta = res.data.meta!;
+  return { items: res.data.data, total: meta.total, page: meta.page, pageSize: meta.pageSize };
+}
+
+export async function listGroupMessages(
+  groupId: string,
+  params: { page?: number; pageSize?: number } = {},
+): Promise<Paginated<GroupMessage>> {
+  const res = await apiClient.get<ApiEnvelope<GroupMessage[]>>(`/groups/${groupId}/messages`, {
     params,
   });
   const meta = res.data.meta!;

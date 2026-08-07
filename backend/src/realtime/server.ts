@@ -8,6 +8,7 @@ import { communityEventBus } from './communityEvents.js';
 import { groupEventBus } from './groupEvents.js';
 import { groupRepository } from '../modules/groups/group.repository.js';
 import { messageService } from '../modules/messages/message.service.js';
+import { groupMessageService } from '../modules/groupMessages/groupMessage.service.js';
 import {
   chatMessageNewSchema,
   chatMessageDeliveredSchema,
@@ -226,6 +227,16 @@ export async function createRealtimeServer(
         iv,
         timestamp,
       });
+
+      // Persist the ciphertext so members can replay history on any device.
+      // Best-effort (mirrors the 1:1 relay): a storage failure must not drop
+      // the live broadcast, so the relay happens first and the failure is only
+      // logged. `storeMessage` re-checks membership as a defense-in-depth gate.
+      void groupMessageService
+        .storeMessage({ groupId, senderId: userId, keyId, ciphertext, iv, timestamp })
+        .catch((err: unknown) => {
+          logger.warn({ err, userId, groupId }, 'Failed to persist group message');
+        });
     });
 
     const relayGroupAck = (event: string) => (raw: unknown) => {

@@ -155,12 +155,15 @@ const theirBundle = {
 function renderChat(
   socket: ReturnType<typeof makeSocket>['socket'],
   navigation?: { goBack: jest.Mock },
+  queryClient?: QueryClient,
 ) {
   mockRealtimeClient.connect.mockReturnValue(socket);
   mockRealtimeClient.open.mockResolvedValue(socket);
   return render(
     <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })}
+      client={
+        queryClient ?? new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+      }
     >
       <AuthProvider>
         <RealtimeProvider>
@@ -192,7 +195,7 @@ describe('ChatScreen delivery and read status', () => {
     mockCrypto.buildSharedSecret.mockResolvedValue(new Uint8Array(32));
     mockCrypto.verifyPreKeySignature.mockResolvedValue(true);
     mockApiClient.get.mockResolvedValue({
-      data: { data: { items: [], total: 0, page: 1, pageSize: 20 } },
+      data: { data: [], meta: { page: 1, pageSize: 20, total: 0, totalPages: 0 } },
     });
   });
 
@@ -200,21 +203,17 @@ describe('ChatScreen delivery and read status', () => {
     mockCrypto.decryptMessage.mockResolvedValue('history message');
     mockApiClient.get.mockResolvedValue({
       data: {
-        data: {
-          items: [
-            {
-              id: 'm1',
-              senderId: 'u2',
-              recipientId: 'u1',
-              ciphertext: 'ct-hist',
-              iv: 'iv-hist',
-              timestamp: 1000,
-            },
-          ],
-          total: 1,
-          page: 1,
-          pageSize: 20,
-        },
+        data: [
+          {
+            id: 'm1',
+            senderId: 'u2',
+            recipientId: 'u1',
+            ciphertext: 'ct-hist',
+            iv: 'iv-hist',
+            timestamp: 1000,
+          },
+        ],
+        meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 },
       },
     });
     const { socket } = makeSocket();
@@ -225,25 +224,33 @@ describe('ChatScreen delivery and read status', () => {
     });
   });
 
+  it('shows an error hint (not the empty state) when history fails to load', async () => {
+    mockApiClient.get.mockRejectedValue(new Error('network down'));
+    const { socket } = makeSocket();
+    await renderChat(socket);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Couldn't load earlier messages/)).toBeOnTheScreen();
+    });
+    // The misleading "no messages" empty state must not be shown on a fetch error.
+    expect(screen.queryByText(/No messages yet/)).toBeNull();
+  });
+
   it('does not duplicate a live message that is also in history', async () => {
     mockCrypto.decryptMessage.mockResolvedValue('overlap message');
     mockApiClient.get.mockResolvedValue({
       data: {
-        data: {
-          items: [
-            {
-              id: 'm1',
-              senderId: 'u2',
-              recipientId: 'u1',
-              ciphertext: 'ct-overlap',
-              iv: 'iv-overlap',
-              timestamp: 12345,
-            },
-          ],
-          total: 1,
-          page: 1,
-          pageSize: 20,
-        },
+        data: [
+          {
+            id: 'm1',
+            senderId: 'u2',
+            recipientId: 'u1',
+            ciphertext: 'ct-overlap',
+            iv: 'iv-overlap',
+            timestamp: 12345,
+          },
+        ],
+        meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 },
       },
     });
     const { socket, emit } = makeSocket();
@@ -260,6 +267,68 @@ describe('ChatScreen delivery and read status', () => {
 
     await waitFor(() => {
       expect(screen.getAllByText(/overlap message/)).toHaveLength(1);
+    });
+  });
+
+  it('merges newly fetched history when the conversation is refetched (reload on return)', async () => {
+    mockCrypto.decryptMessage.mockImplementation(
+      async (_secret: unknown, ct: string) => `dec:${ct}`,
+    );
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+    mockApiClient.get.mockResolvedValue({
+      data: {
+        data: [
+          {
+            id: 'm1',
+            senderId: 'u2',
+            recipientId: 'u1',
+            ciphertext: 'ct-1',
+            iv: 'iv-1',
+            timestamp: 1000,
+          },
+        ],
+        meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 },
+      },
+    });
+    const { socket } = makeSocket();
+    await renderChat(socket, undefined, queryClient);
+
+    await waitFor(() => {
+      expect(screen.getByText(/dec:ct-1/)).toBeOnTheScreen();
+    });
+
+    mockApiClient.get.mockResolvedValue({
+      data: {
+        data: [
+          {
+            id: 'm2',
+            senderId: 'u2',
+            recipientId: 'u1',
+            ciphertext: 'ct-2',
+            iv: 'iv-2',
+            timestamp: 2000,
+          },
+          {
+            id: 'm1',
+            senderId: 'u2',
+            recipientId: 'u1',
+            ciphertext: 'ct-1',
+            iv: 'iv-1',
+            timestamp: 1000,
+          },
+        ],
+        meta: { page: 1, pageSize: 20, total: 2, totalPages: 1 },
+      },
+    });
+
+    await act(async () => {
+      await queryClient.invalidateQueries();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/dec:ct-2/)).toBeOnTheScreen();
     });
   });
 
@@ -349,6 +418,29 @@ describe('ChatScreen delivery and read status', () => {
         timestamp: 12345,
       });
     });
+  });
+
+  it('ignores an incoming message from a different conversation', async () => {
+    mockCrypto.decryptMessage.mockResolvedValue('decrypted hello');
+    const { socket, emit } = makeSocket();
+    await renderChat(socket);
+
+    await act(async () => {
+      // The recipient's user room receives messages from every sender; a
+      // message from u3 belongs to another thread and must not surface here.
+      emit('chat:message:new', {
+        senderId: 'u3',
+        ciphertext: 'ct-other',
+        iv: 'iv-other',
+        timestamp: 999,
+      });
+    });
+
+    expect(mockCrypto.decryptMessage).not.toHaveBeenCalled();
+    expect(screen.queryByText(/decrypted hello/)).toBeNull();
+    // No delivery/read ack is emitted for a message we did not accept.
+    expect(socket.emit).not.toHaveBeenCalledWith('chat:message:delivered', expect.anything());
+    expect(socket.emit).not.toHaveBeenCalledWith('chat:message:read', expect.anything());
   });
 
   it('refuses to send when the recipient bundle fails signature verification', async () => {

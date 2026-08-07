@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { groupController } from './group.controller.js';
+import { groupMessageController } from '../groupMessages/groupMessage.controller.js';
 import {
   createGroupSchema,
   addMembersSchema,
@@ -7,6 +8,10 @@ import {
   groupMemberParamSchema,
   listMembersQuerySchema,
 } from './group.validation.js';
+import {
+  groupMessageParamSchema,
+  groupMessageQuerySchema,
+} from '../groupMessages/groupMessage.validation.js';
 import { authenticate } from '../../middleware/authenticate.js';
 import { validate } from '../../middleware/validate.js';
 import { asyncHandler } from '../../utils/asyncHandler.js';
@@ -113,6 +118,38 @@ groupRouter.get(
   '/:groupId',
   validate({ params: groupIdParamSchema }),
   asyncHandler(groupController.getById),
+);
+
+/**
+ * @swagger
+ * /groups/{groupId}/messages:
+ *   get:
+ *     summary: List a group's E2EE message history (members only, newest first, paginated)
+ *     description: >
+ *       Returns stored E2EE ciphertext only — the server never holds plaintext.
+ *       Each message carries the sender's `keyId` so members can unwrap the
+ *       sender key and decrypt. Only group members can read history.
+ *     tags: [Groups]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - { name: groupId, in: path, required: true, schema: { type: string } }
+ *       - { name: page, in: query, schema: { type: integer, default: 1 } }
+ *       - { name: pageSize, in: query, schema: { type: integer, default: 20, maximum: 100 } }
+ *     responses:
+ *       200:
+ *         description: Paginated ciphertext messages
+ *       403:
+ *         description: Not a member
+ *       404:
+ *         description: Group not found
+ *       422:
+ *         description: Validation failed
+ */
+groupRouter.get(
+  '/:groupId/messages',
+  validate({ params: groupMessageParamSchema, query: groupMessageQuerySchema }),
+  asyncHandler(groupMessageController.listMessages),
 );
 
 /**

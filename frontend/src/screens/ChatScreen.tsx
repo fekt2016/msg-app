@@ -125,16 +125,14 @@ export function ChatScreen({ route, navigation }: Props) {
   const [inputText, setInputText] = useState('');
   const [keyError, setKeyError] = useState<string | null>(null);
   const flatListRef = useRef<FlatList>(null);
-  const historyMergedRef = useRef(false);
-  const { data: history, isLoading: historyLoading } = useConversationMessages(userId);
+  const {
+    data: history,
+    isLoading: historyLoading,
+    isError: historyError,
+  } = useConversationMessages(userId);
 
   useEffect(() => {
-    if (!currentUserId || historyMergedRef.current) return;
-    if (!history || history.items.length === 0) {
-      if (history) historyMergedRef.current = true;
-      return;
-    }
-    historyMergedRef.current = true;
+    if (!currentUserId || !history || history.items.length === 0) return;
 
     let cancelled = false;
     void (async () => {
@@ -148,20 +146,22 @@ export function ChatScreen({ route, navigation }: Props) {
       const loaded = (
         decrypted.filter((m): m is ChatMessage => m !== null) as ChatMessage[]
       ).reverse();
-      if (loaded.length > 0) {
-        setMessages((prev) => {
-          // A live message that arrived while history was fetching is already in
-          // state (its id is `${senderId}-${timestamp}`) — don't duplicate it.
-          const fresh = loaded.filter(
-            (m) =>
-              !prev.some(
-                (existing) =>
-                  existing.senderId === m.senderId && existing.timestamp === m.timestamp,
-              ),
-          );
-          return [...fresh, ...prev];
-        });
-      }
+      if (loaded.length === 0) return;
+      setMessages((prev) => {
+        // A live message that arrived while history was fetching is already in
+        // state (its id is `${senderId}-${timestamp}`) — don't duplicate it.
+        const fresh = loaded.filter(
+          (m) =>
+            !prev.some(
+              (existing) => existing.senderId === m.senderId && existing.timestamp === m.timestamp,
+            ),
+        );
+        if (fresh.length === 0) return prev;
+        // Merge on every history update (e.g. a fresh refetch after re-entering
+        // the screen) — the dedup above keeps re-merges idempotent. Sort so a
+        // new history item newer than a live message still renders in order.
+        return [...fresh, ...prev].sort((a, b) => a.timestamp - b.timestamp);
+      });
     })();
 
     return () => {
@@ -176,7 +176,10 @@ export function ChatScreen({ route, navigation }: Props) {
 
     const handleIncoming = (payload: EncryptedMessageEvent) => {
       void (async () => {
-        if (payload.senderId === currentUserId) return;
+        // The recipient's user room receives every incoming message; only
+        // append (and ack) the ones belonging to the conversation on screen.
+        // `userId` is the peer for this thread, so this also drops self-echoes.
+        if (payload.senderId !== userId) return;
 
         let ciphertext = payload.ciphertext;
         let verificationFailed = false;
@@ -377,6 +380,10 @@ export function ChatScreen({ route, navigation }: Props) {
           ListEmptyComponent={
             historyLoading ? (
               <Text style={styles.historyHint}>Loading conversation…</Text>
+            ) : historyError ? (
+              <Text style={styles.historyErrorHint}>
+                Couldn&apos;t load earlier messages. Pull down or reopen the chat to retry.
+              </Text>
             ) : (
               <Text style={styles.historyHint}>No messages yet — say hi!</Text>
             )
@@ -390,7 +397,9 @@ export function ChatScreen({ route, navigation }: Props) {
                   ⚠ Could not verify sender&apos;s keys — message not shown
                 </Text>
               ) : (
-                <Text style={styles.messageText}>{item.ciphertext.slice(0, 40)}…</Text>
+                <Text style={item.isOwn ? styles.messageText : styles.otherMessageText}>
+                  {item.ciphertext}
+                </Text>
               )}
               <View style={styles.messageMeta}>
                 <Text style={styles.messageTime}>
@@ -498,6 +507,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: spacing.lg,
   },
+  historyErrorHint: {
+    color: colors.terracotta,
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: spacing.lg,
+  },
   messageBubble: {
     maxWidth: '80%',
     paddingHorizontal: spacing.md,
@@ -514,6 +529,11 @@ const styles = StyleSheet.create({
   },
   messageText: {
     color: colors.baobabDeep,
+    fontSize: 15,
+    lineHeight: 20,
+  },
+  otherMessageText: {
+    color: colors.savanna,
     fontSize: 15,
     lineHeight: 20,
   },

@@ -21,7 +21,7 @@ import {
   type GroupMessageEvent,
   type GroupMemberEvent,
 } from '../realtime/client';
-import { useGroupMembers, groupKeys } from '../hooks/useGroups';
+import { useGroupMembers, useGroupMessages, groupKeys } from '../hooks/useGroups';
 import {
   ensureOwnSenderKeyDistributed,
   rotateOwnSenderKey,
@@ -56,6 +56,11 @@ export function GroupChatScreen({ route, navigation }: Props) {
   const flatListRef = useRef<FlatList>(null);
 
   const { data: membersData } = useGroupMembers(groupId);
+  const {
+    data: history,
+    isLoading: historyLoading,
+    isError: historyError,
+  } = useGroupMessages(groupId);
   const memberIds = useMemo(() => membersData?.items.map((m) => m.userId) ?? [], [membersData]);
   const nameByUser = useMemo(() => {
     const map = new Map<string, string>();
@@ -64,6 +69,72 @@ export function GroupChatScreen({ route, navigation }: Props) {
     }
     return map;
   }, [membersData]);
+
+  // Merge persisted history whenever it (re)loads — a fresh refetch after
+  // re-entering the screen re-merges here (dedup keeps it idempotent) so the
+  // thread reloads the latest messages, mirroring the 1:1 ChatScreen behavior.
+  useEffect(() => {
+    if (!currentUserId || !history || history.items.length === 0) return;
+
+    let cancelled = false;
+    void (async () => {
+      const loaded = await Promise.all(
+        history.items.map(async (stored) => {
+          let text = '';
+          let decryptFailed = false;
+          try {
+            text = await decryptGroupMessage(
+              stored.groupId,
+              stored.senderId,
+              stored.keyId,
+              stored.ciphertext,
+              stored.iv,
+            );
+          } catch {
+            decryptFailed = true;
+          }
+          return {
+            id: `${stored.senderId}-${stored.timestamp}`,
+            senderId: stored.senderId,
+            senderName: nameByUser.get(stored.senderId) ?? 'Member',
+            text,
+            timestamp: stored.timestamp,
+            isOwn: stored.senderId === currentUserId,
+            decryptFailed,
+          };
+        }),
+      );
+      if (cancelled) return;
+      // Endpoint returns newest-first; reverse for chronological render order.
+      const chrono = loaded.reverse();
+      setMessages((prev) => {
+        const fresh = chrono.filter(
+          (m) =>
+            !prev.some(
+              (existing) => existing.senderId === m.senderId && existing.timestamp === m.timestamp,
+            ),
+        );
+        if (fresh.length === 0) return prev;
+        return [...fresh, ...prev].sort((a, b) => a.timestamp - b.timestamp);
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [history, currentUserId, nameByUser]);
+
+  // History merged before the member roster arrived keeps placeholder names;
+  // refresh them once the roster loads.
+  useEffect(() => {
+    if (nameByUser.size === 0) return;
+    setMessages((prev) =>
+      prev.map((m) => {
+        const name = nameByUser.get(m.senderId);
+        return name && m.senderName !== name ? { ...m, senderName: name } : m;
+      }),
+    );
+  }, [nameByUser]);
 
   // Distribute the caller's sender key to the current roster once it is known,
   // and re-distribute whenever the roster changes (idempotent for existing
@@ -133,7 +204,12 @@ export function GroupChatScreen({ route, navigation }: Props) {
       // Rotate our sender key so the departed member cannot read future
       // messages (forward secrecy of the sender-key scheme).
       const remaining = memberIds.filter((id) => id !== payload.userId);
-      void rotateOwnSenderKey(groupId, remaining, currentUserId).catch(() => undefined);
+      // Best-effort: a failed rotation is re-attempted on next screen open
+      // (ensure-on-mount). Log it so a persistent failure is visible rather
+      // than silently leaving the departed member able to read future messages.
+      void rotateOwnSenderKey(groupId, remaining, currentUserId).catch((err) => {
+        console.error('[group-e2ee] sender-key rotation after member-left failed:', err);
+      });
       void queryClient.invalidateQueries({ queryKey: groupKeys.members(groupId) });
     };
 
@@ -240,14 +316,26 @@ export function GroupChatScreen({ route, navigation }: Props) {
               {item.decryptFailed ? (
                 <Text style={styles.messageWarning}>⚠ Could not decrypt this message</Text>
               ) : (
-                <Text style={styles.messageText}>{item.text}</Text>
+                <Text style={item.isOwn ? styles.messageText : styles.otherMessageText}>
+                  {item.text}
+                </Text>
               )}
               <Text style={styles.messageTime}>
                 {new Date(item.timestamp).toLocaleTimeString()}
               </Text>
             </View>
           )}
-          ListEmptyComponent={<Text style={styles.empty}>No messages yet. Say hello 👋</Text>}
+          ListEmptyComponent={
+            historyLoading ? (
+              <Text style={styles.empty}>Loading conversation…</Text>
+            ) : historyError ? (
+              <Text style={styles.emptyError}>
+                Couldn&apos;t load earlier messages. Reopen the chat to retry.
+              </Text>
+            ) : (
+              <Text style={styles.empty}>No messages yet. Say hello 👋</Text>
+            )
+          }
         />
 
         {sessionError && (
@@ -314,6 +402,7 @@ const styles = StyleSheet.create({
   otherBubble: { alignSelf: 'flex-start', backgroundColor: colors.inputSurface },
   senderName: { color: colors.kenteGold, fontSize: 12, fontWeight: '700', marginBottom: 2 },
   messageText: { color: colors.baobabDeep, fontSize: 15, lineHeight: 20 },
+  otherMessageText: { color: colors.savanna, fontSize: 15, lineHeight: 20 },
   messageWarning: { color: colors.terracotta, fontSize: 13, fontStyle: 'italic' },
   messageTime: {
     color: colors.savannaMuted,
@@ -322,6 +411,12 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
   empty: { color: colors.savannaMuted, fontSize: 14, textAlign: 'center', marginTop: spacing.xl },
+  emptyError: {
+    color: colors.terracotta,
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: spacing.xl,
+  },
   errorBanner: {
     marginHorizontal: spacing.lg,
     marginBottom: spacing.sm,

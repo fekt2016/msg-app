@@ -6,6 +6,7 @@ import {
   getGroup,
   leaveGroup,
   listGroupMembers,
+  listGroupMessages,
   listGroups,
   removeGroupMember,
   type CreateGroupInput,
@@ -16,6 +17,7 @@ export const groupKeys = {
   list: () => [...groupKeys.all, 'list'] as const,
   detail: (groupId: string) => [...groupKeys.all, 'detail', groupId] as const,
   members: (groupId: string) => [...groupKeys.all, 'members', groupId] as const,
+  messages: (groupId: string) => [...groupKeys.all, 'messages', groupId] as const,
 };
 
 export function useGroups() {
@@ -38,6 +40,17 @@ export function useGroupMembers(groupId: string, options: { enabled?: boolean } 
     queryKey: groupKeys.members(groupId),
     queryFn: () => listGroupMembers(groupId, { pageSize: 100 }),
     enabled: options.enabled ?? true,
+  });
+}
+
+export function useGroupMessages(groupId: string, options: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: groupKeys.messages(groupId),
+    queryFn: () => listGroupMessages(groupId),
+    enabled: options.enabled ?? true,
+    // Always refetch on mount so re-entering a group chat reloads the latest
+    // history instead of serving a stale cached page.
+    refetchOnMount: 'always',
   });
 }
 

@@ -31,8 +31,9 @@ export async function listConversationMessages(
   userId: string,
   options: ListConversationOptions = {},
 ): Promise<Paginated<StoredMessage>> {
-  const res = await apiClient.get<ApiEnvelope<Paginated<StoredMessage>>>(`/messages/${userId}`, {
+  const res = await apiClient.get<ApiEnvelope<StoredMessage[]>>(`/messages/${userId}`, {
     params: { page: options.page ?? 1, pageSize: options.pageSize ?? 20 },
   });
-  return res.data.data;
+  const meta = res.data.meta!;
+  return { items: res.data.data, total: meta.total, page: meta.page, pageSize: meta.pageSize };
 }
