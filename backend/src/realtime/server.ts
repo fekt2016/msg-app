@@ -7,6 +7,7 @@ import { presenceStore, type PresenceStore } from './presence.js';
 import { communityEventBus } from './communityEvents.js';
 import { groupEventBus } from './groupEvents.js';
 import { groupRepository } from '../modules/groups/group.repository.js';
+import { communityRepository } from '../modules/communities/community.repository.js';
 import { messageService } from '../modules/messages/message.service.js';
 import { groupMessageService } from '../modules/groupMessages/groupMessage.service.js';
 import {
@@ -14,6 +15,7 @@ import {
   chatMessageDeliveredSchema,
   chatMessageReadSchema,
   groupSubscribeSchema,
+  communitySubscribeSchema,
   chatGroupMessageNewSchema,
   chatGroupAckSchema,
   type ChatMessageNewPayload,
@@ -34,6 +36,9 @@ export const REALTIME_EVENTS = {
   CHAT_GROUP_MESSAGE_NEW: 'chat:group:message:new',
   CHAT_GROUP_MESSAGE_DELIVERED: 'chat:group:message:delivered',
   CHAT_GROUP_MESSAGE_READ: 'chat:group:message:read',
+  COMMUNITY_SUBSCRIBE: 'community:subscribe',
+  COMMUNITY_UNSUBSCRIBE: 'community:unsubscribe',
+  COMMUNITY_SUBSCRIBED: 'community:subscribed',
 } as const;
 
 export interface RealtimeServer {
@@ -200,6 +205,50 @@ export async function createRealtimeServer(
         return;
       }
       void socket.leave(`group:${parsed.data.groupId}`);
+    });
+
+    // Community member-list live updates. A socket may join `community:{id}`
+    // only if it could read the community — PUBLIC, or a member of a PRIVATE
+    // one — mirroring the `getByIdOrSlug` access rule so a non-member can never
+    // observe a private community's membership churn. `communityEventBus`
+    // broadcasts member join/leave/role changes to this room (and evicts a
+    // departed member on the way out).
+    socket.on(REALTIME_EVENTS.COMMUNITY_SUBSCRIBE, (raw: unknown) => {
+      const parsed = communitySubscribeSchema.safeParse(raw);
+      if (!parsed.success) {
+        logger.warn(
+          { userId, errors: parsed.error.flatten() },
+          'Invalid community:subscribe payload',
+        );
+        return;
+      }
+      const { communityId } = parsed.data;
+      void (async () => {
+        const community = await communityRepository.findById(communityId);
+        if (!community || community.deletedAt) {
+          return;
+        }
+        if (community.visibility === 'PRIVATE') {
+          const member = await communityRepository.findMember(communityId, userId);
+          if (!member) {
+            logger.warn(
+              { userId, communityId },
+              'Rejected community:subscribe from non-member of a private community',
+            );
+            return;
+          }
+        }
+        await socket.join(`community:${communityId}`);
+        socket.emit(REALTIME_EVENTS.COMMUNITY_SUBSCRIBED, { communityId });
+      })();
+    });
+
+    socket.on(REALTIME_EVENTS.COMMUNITY_UNSUBSCRIBE, (raw: unknown) => {
+      const parsed = communitySubscribeSchema.safeParse(raw);
+      if (!parsed.success) {
+        return;
+      }
+      void socket.leave(`community:${parsed.data.communityId}`);
     });
 
     socket.on(REALTIME_EVENTS.CHAT_GROUP_MESSAGE_NEW, (raw: unknown) => {

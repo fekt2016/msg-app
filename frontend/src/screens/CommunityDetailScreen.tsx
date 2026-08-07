@@ -37,6 +37,11 @@ export function CommunityDetailScreen({ route, navigation }: Props) {
   useEffect(() => {
     if (!communityId) return;
     const socket = realtimeClient.connect();
+    // Join the community's broadcast room so the member list live-updates when
+    // ANY user joins/leaves/changes role — not just the current user's own
+    // actions (which also arrive via this device's user room). The server gates
+    // the join on read access (PUBLIC, or member of a PRIVATE community).
+    socket.emit(REALTIME_EVENTS.COMMUNITY_SUBSCRIBE, { communityId });
 
     const handleMembershipChange = (payload: CommunityMemberEvent) => {
       if (payload.communityId !== communityId) return;
@@ -52,6 +57,7 @@ export function CommunityDetailScreen({ route, navigation }: Props) {
     socket.on(REALTIME_EVENTS.COMMUNITY_MEMBER_ROLE, handleMembershipChange);
 
     return () => {
+      socket.emit(REALTIME_EVENTS.COMMUNITY_UNSUBSCRIBE, { communityId });
       socket.off(REALTIME_EVENTS.COMMUNITY_MEMBER_JOINED, handleMembershipChange);
       socket.off(REALTIME_EVENTS.COMMUNITY_MEMBER_LEFT, handleMembershipChange);
       socket.off(REALTIME_EVENTS.COMMUNITY_MEMBER_ROLE, handleMembershipChange);

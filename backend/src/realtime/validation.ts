@@ -25,6 +25,15 @@ export const groupSubscribeSchema = z.object({
   groupId,
 });
 
+// `communityId` is a real Community `_id` — ObjectId-validated so the
+// visibility/membership lookup for the room-join gate never hits a CastError.
+const communityId = z.string().regex(/^[a-f\d]{24}$/i);
+
+export const communitySubscribeSchema = z.object({
+  communityId,
+});
+export type CommunitySubscribePayload = z.infer<typeof communitySubscribeSchema>;
+
 export const chatGroupMessageNewSchema = z.object({
   groupId,
   keyId: z.number().int().positive(),

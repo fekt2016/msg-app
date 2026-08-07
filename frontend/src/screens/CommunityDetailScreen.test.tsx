@@ -132,6 +132,16 @@ describe('CommunityDetailScreen', () => {
     await waitFor(() => expect(mockApi.joinCommunity).toHaveBeenCalledWith('accra-tech'));
   });
 
+  it('subscribes to the community broadcast room on open', async () => {
+    await renderScreen(nav());
+    await screen.findByText('Accra Tech');
+    // Joining the room is what makes the member list live-update for OTHER
+    // users' join/leave/role changes, not just the current user's own.
+    await waitFor(() =>
+      expect(socket.emit).toHaveBeenCalledWith('community:subscribe', { communityId: 'c1' }),
+    );
+  });
+
   it('refetches detail + members on a matching community membership event', async () => {
     await renderScreen(nav());
     expect(await screen.findByText('Accra Tech')).toBeOnTheScreen();
