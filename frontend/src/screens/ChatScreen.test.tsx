@@ -617,8 +617,10 @@ describe('ChatScreen delivery and read status', () => {
   });
 
   it('shows a "can\'t decrypt" state (never the raw ciphertext) for undecryptable history', async () => {
-    // Identity rotated/regenerated since these were sent — the ciphertext no
-    // longer decrypts on this device. The bubble must show an explicit state,
+    // `senderId: 'u1'` is the current user, so this is one of OUR OWN sent
+    // messages — the exact scenario from the bug report (own messages rendering
+    // as gibberish after an on-device identity regeneration). The ciphertext no
+    // longer decrypts on this device; the bubble must show an explicit state,
     // not render the base64 ciphertext as if it were the message text.
     mockCrypto.decryptMessage.mockRejectedValue(new Error('bad auth tag'));
     mockApiClient.get.mockResolvedValue({
