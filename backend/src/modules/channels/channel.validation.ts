@@ -52,6 +52,43 @@ export const subscriberParamSchema = z
   })
   .strict();
 
+export const createInviteSchema = z
+  .object({
+    role: z.enum(['SUBSCRIBER', 'ADMIN']).optional(),
+    expiresInDays: z.coerce.number().int().min(1).max(30).default(7),
+    maxUses: z.coerce.number().int().min(1).max(1000).default(1),
+  })
+  .strict();
+
+export const inviteTokenParamSchema = z
+  .object({
+    token: z.string().min(1).max(500),
+  })
+  .strict();
+
+export const inviteParamSchema = z
+  .object({
+    identifier: z.string().min(1).max(100),
+    inviteId: z.string().min(1),
+  })
+  .strict();
+
+export const decideJoinRequestSchema = z
+  .object({
+    action: z.enum(['APPROVE', 'DENY']),
+  })
+  .strict();
+
+export const listJoinRequestsQuerySchema = z
+  .object({
+    status: z.enum(['PENDING', 'APPROVED', 'DENIED']).default('PENDING'),
+    page: z.coerce.number().int().positive().default(1),
+    pageSize: z.coerce.number().int().positive().max(100).default(20),
+  })
+  .strict();
+
 export type CreateChannelBody = z.infer<typeof createChannelSchema>;
 export type UpdateChannelBody = z.infer<typeof updateChannelSchema>;
 export type UpdateSubscriberRoleBody = z.infer<typeof updateSubscriberRoleSchema>;
+export type CreateInviteBody = z.infer<typeof createInviteSchema>;
+export type DecideJoinRequestBody = z.infer<typeof decideJoinRequestSchema>;

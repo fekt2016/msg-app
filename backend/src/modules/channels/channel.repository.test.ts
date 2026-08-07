@@ -23,6 +23,26 @@ vi.mock('./channelSubscriber.model.js', () => ({
   },
 }));
 
+vi.mock('./channelInvite.model.js', () => ({
+  ChannelInviteModel: {
+    create: vi.fn(),
+    find: vi.fn(),
+    findOne: vi.fn(),
+    findByIdAndUpdate: vi.fn(),
+    updateOne: vi.fn(),
+  },
+}));
+
+vi.mock('./channelJoinRequest.model.js', () => ({
+  ChannelJoinRequestModel: {
+    create: vi.fn(),
+    find: vi.fn(),
+    findOne: vi.fn(),
+    findOneAndUpdate: vi.fn(),
+    countDocuments: vi.fn(),
+  },
+}));
+
 vi.mock('../auth/user.repository.js', () => ({
   userRepository: {
     findByIds: vi.fn(),
@@ -31,11 +51,21 @@ vi.mock('../auth/user.repository.js', () => ({
 
 import { ChannelModel } from './channel.model.js';
 import { ChannelSubscriberModel } from './channelSubscriber.model.js';
+import { ChannelInviteModel } from './channelInvite.model.js';
+import { ChannelJoinRequestModel } from './channelJoinRequest.model.js';
 import { userRepository } from '../auth/user.repository.js';
 import { channelRepository } from './channel.repository.js';
 
 const channelModel = vi.mocked(ChannelModel) as unknown as Record<string, ReturnType<typeof vi.fn>>;
 const subscriberModel = vi.mocked(ChannelSubscriberModel) as unknown as Record<
+  string,
+  ReturnType<typeof vi.fn>
+>;
+const inviteModel = vi.mocked(ChannelInviteModel) as unknown as Record<
+  string,
+  ReturnType<typeof vi.fn>
+>;
+const joinRequestModel = vi.mocked(ChannelJoinRequestModel) as unknown as Record<
   string,
   ReturnType<typeof vi.fn>
 >;
@@ -218,5 +248,142 @@ describe('channelRepository.listSubscriptionsForUser', () => {
     const result = await channelRepository.listSubscriptionsForUser('user-1');
     expect(subscriberModel.find).toHaveBeenCalledWith({ userId: 'user-1' });
     expect(result).toHaveLength(1);
+  });
+});
+
+function inviteDoc(overrides: Record<string, unknown> = {}) {
+  return {
+    _id: { toString: () => 'invite-1' },
+    channelId: { toString: () => 'channel-1' },
+    createdBy: { toString: () => 'user-1' },
+    tokenHash: 'hashed-token',
+    role: 'SUBSCRIBER',
+    expiresAt: new Date('2026-02-01T00:00:00.000Z'),
+    usedCount: 0,
+    maxUses: 1,
+    revokedAt: null,
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    ...overrides,
+  } as never;
+}
+
+function joinRequestDoc(overrides: Record<string, unknown> = {}) {
+  return {
+    _id: { toString: () => 'request-1' },
+    channelId: { toString: () => 'channel-1' },
+    userId: { toString: () => 'user-2' },
+    role: 'SUBSCRIBER',
+    status: 'PENDING',
+    decidedAt: null,
+    decidedBy: null,
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    ...overrides,
+  } as never;
+}
+
+describe('channelRepository invites', () => {
+  it('creates an invite', async () => {
+    inviteModel.create.mockResolvedValue(inviteDoc());
+    const input = {
+      channelId: 'channel-1',
+      createdBy: 'user-1',
+      tokenHash: 'hashed-token',
+      role: 'ADMIN' as const,
+      expiresAt: new Date('2026-02-01T00:00:00.000Z'),
+      maxUses: 1,
+    };
+    await channelRepository.createInvite(input);
+    expect(inviteModel.create).toHaveBeenCalledWith(input);
+  });
+
+  it('finds an invite by token hash', async () => {
+    inviteModel.findOne.mockResolvedValue(inviteDoc());
+    const result = await channelRepository.findInviteByTokenHash('hashed-token');
+    expect(inviteModel.findOne).toHaveBeenCalledWith({ tokenHash: 'hashed-token' });
+    expect(result).toBeDefined();
+  });
+
+  it('lists active (non-revoked) invites for a channel sorted newest first', async () => {
+    inviteModel.find.mockReturnValue({ sort: vi.fn().mockResolvedValue([inviteDoc()]) });
+    const result = await channelRepository.listActiveInvites('channel-1');
+    expect(inviteModel.find).toHaveBeenCalledWith({ channelId: 'channel-1', revokedAt: null });
+    expect(inviteModel.find).toHaveBeenCalledTimes(1);
+    expect(result).toHaveLength(1);
+  });
+
+  it('revokes an invite by id', async () => {
+    inviteModel.findByIdAndUpdate.mockResolvedValue(inviteDoc({ revokedAt: new Date() }));
+    await channelRepository.revokeInvite('invite-1');
+    expect(inviteModel.findByIdAndUpdate).toHaveBeenCalledWith(
+      'invite-1',
+      { $set: { revokedAt: expect.any(Date) } },
+      { new: true },
+    );
+  });
+
+  it('increments the invite used count', async () => {
+    inviteModel.updateOne.mockResolvedValue(undefined);
+    await channelRepository.incrementInviteUsed('invite-1');
+    expect(inviteModel.updateOne).toHaveBeenCalledWith(
+      { _id: 'invite-1' },
+      { $inc: { usedCount: 1 } },
+    );
+  });
+});
+
+describe('channelRepository join requests', () => {
+  it('creates a pending join request', async () => {
+    joinRequestModel.create.mockResolvedValue(joinRequestDoc());
+    await channelRepository.createJoinRequest('channel-1', 'user-2');
+    expect(joinRequestModel.create).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      userId: 'user-2',
+    });
+  });
+
+  it('finds the live pending request for a user', async () => {
+    joinRequestModel.findOne.mockResolvedValue(joinRequestDoc());
+    const result = await channelRepository.findLiveJoinRequest('channel-1', 'user-2');
+    expect(joinRequestModel.findOne).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      userId: 'user-2',
+      status: 'PENDING',
+    });
+    expect(result).toBeDefined();
+  });
+
+  it('lists requests with the requester display name joined in one query', async () => {
+    const sort = vi.fn(() => ({
+      skip: () => ({ limit: () => execChain([joinRequestDoc()]) }),
+    }));
+    joinRequestModel.find.mockReturnValue({ sort });
+    joinRequestModel.countDocuments.mockResolvedValue(1);
+    userRepository.findByIds.mockResolvedValue([
+      {
+        _id: { toString: () => 'user-2' },
+        displayName: 'Kwame',
+        avatar: { url: 'https://img/k.png' },
+      },
+    ]);
+
+    const result = await channelRepository.listJoinRequests('channel-1', 'PENDING', 1, 20);
+
+    expect(joinRequestModel.find).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      status: 'PENDING',
+    });
+    expect(userRepository.findByIds).toHaveBeenCalledWith(['user-2']);
+    expect(result.items[0].displayName).toBe('Kwame');
+    expect(result.items[0].avatarUrl).toBe('https://img/k.png');
+  });
+
+  it('transitions a pending request to a decided status', async () => {
+    joinRequestModel.findOneAndUpdate.mockResolvedValue(joinRequestDoc({ status: 'APPROVED' }));
+    await channelRepository.setJoinRequestStatus('channel-1', 'user-2', 'APPROVED', 'user-1');
+    expect(joinRequestModel.findOneAndUpdate).toHaveBeenCalledWith(
+      { channelId: 'channel-1', userId: 'user-2', status: 'PENDING' },
+      { $set: { status: 'APPROVED', decidedAt: expect.any(Date), decidedBy: 'user-1' } },
+      { new: true },
+    );
   });
 });

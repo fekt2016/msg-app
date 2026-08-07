@@ -5,6 +5,8 @@ import type {
   CreateChannelBody,
   UpdateChannelBody,
   UpdateSubscriberRoleBody,
+  CreateInviteBody,
+  DecideJoinRequestBody,
 } from './channel.validation.js';
 
 export const channelController = {
@@ -92,5 +94,75 @@ export const channelController = {
         totalPages: Math.ceil(result.total / result.pageSize),
       }),
     );
+  },
+
+  async createInvite(req: Request, res: Response) {
+    const identifier = String(req.params.identifier);
+    const body = req.body as CreateInviteBody;
+    const result = await channelService.createInvite(req.user!.id, identifier, body);
+    res.status(201).json(apiCreated(result));
+  },
+
+  async listInvites(req: Request, res: Response) {
+    const identifier = String(req.params.identifier);
+    const result = await channelService.listInvites(req.user!.id, identifier);
+    res.status(200).json(apiResponse(result.items));
+  },
+
+  async revokeInvite(req: Request, res: Response) {
+    const identifier = String(req.params.identifier);
+    const inviteId = String(req.params.inviteId);
+    await channelService.revokeInvite(req.user!.id, identifier, inviteId);
+    res.status(200).json(apiResponse({ revoked: true }));
+  },
+
+  async previewInvite(req: Request, res: Response) {
+    const token = String(req.params.token);
+    const result = await channelService.previewInvite(token);
+    res.status(200).json(apiResponse(result));
+  },
+
+  async joinViaInvite(req: Request, res: Response) {
+    const token = String(req.params.token);
+    const result = await channelService.joinViaInvite(req.user!.id, token);
+    res.status(200).json(apiResponse(result));
+  },
+
+  async createJoinRequest(req: Request, res: Response) {
+    const identifier = String(req.params.identifier);
+    await channelService.createJoinRequest(req.user!.id, identifier);
+    res.status(201).json(apiCreated({ requested: true }));
+  },
+
+  async listJoinRequests(req: Request, res: Response) {
+    const identifier = String(req.params.identifier);
+    const { status, page, pageSize } = req.query as unknown as {
+      status: 'PENDING' | 'APPROVED' | 'DENIED';
+      page: number;
+      pageSize: number;
+    };
+    const result = await channelService.listJoinRequests(
+      req.user!.id,
+      identifier,
+      status,
+      page,
+      pageSize,
+    );
+    res.status(200).json(
+      apiResponse(result.items, {
+        page: result.page,
+        pageSize: result.pageSize,
+        total: result.total,
+        totalPages: Math.ceil(result.total / result.pageSize),
+      }),
+    );
+  },
+
+  async decideJoinRequest(req: Request, res: Response) {
+    const identifier = String(req.params.identifier);
+    const targetUserId = String(req.params.userId);
+    const body = req.body as DecideJoinRequestBody;
+    await channelService.decideJoinRequest(req.user!.id, identifier, targetUserId, body.action);
+    res.status(200).json(apiResponse({ status: body.action }));
   },
 };

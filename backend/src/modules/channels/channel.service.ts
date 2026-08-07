@@ -1,7 +1,16 @@
+import { createHash, randomBytes } from 'node:crypto';
 import { AppError } from '../../errors/AppError.js';
 import { channelRepository } from './channel.repository.js';
 import type { ChannelRole } from './channelSubscriber.model.js';
+import type { InviteRole } from './channelInvite.model.js';
+import type { ChannelInviteDoc } from './channelInvite.model.js';
 import type { ChannelDoc, ChannelVisibility } from './channel.model.js';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
 
 export interface SafeChannel {
   id: string;
@@ -240,6 +249,189 @@ export const channelService = {
     };
   },
 
+  async createInvite(
+    actorId: string,
+    identifier: string,
+    input: { role?: InviteRole; expiresInDays?: number; maxUses?: number },
+  ) {
+    const channel = await this.getForAdmin(identifier, actorId, 'UPDATE');
+    const expiresInDays = Math.min(Math.max(input.expiresInDays ?? 7, 1), 30);
+    const token = randomBytes(32).toString('base64url');
+    const invite = await channelRepository.createInvite({
+      channelId: channel.id,
+      createdBy: actorId,
+      tokenHash: sha256(token),
+      role: input.role === 'ADMIN' ? 'ADMIN' : 'SUBSCRIBER',
+      expiresAt: new Date(Date.now() + expiresInDays * DAY_MS),
+      maxUses: Math.min(Math.max(input.maxUses ?? 1, 1), 1000),
+    });
+    return { token, invite: toSafeInvite(invite) };
+  },
+
+  async listInvites(actorId: string, identifier: string) {
+    const channel = await this.getForAdmin(identifier, actorId, 'UPDATE');
+    const invites = await channelRepository.listActiveInvites(channel.id);
+    return { items: invites.map(toSafeInvite) };
+  },
+
+  async revokeInvite(actorId: string, identifier: string, inviteId: string): Promise<void> {
+    const channel = await this.getForAdmin(identifier, actorId, 'UPDATE');
+    const invite = await channelRepository.revokeInvite(inviteId);
+    if (!invite || invite.channelId.toString() !== channel.id) {
+      throw new AppError(404, 'INVITE_NOT_FOUND', 'Invite not found');
+    }
+  },
+
+  async previewInvite(token: string) {
+    const invite = await this.assertValidInvite(token);
+    const channel = await channelRepository.findById(invite.channelId.toString());
+    if (!channel || channel.deletedAt) {
+      throw new AppError(404, 'CHANNEL_NOT_FOUND', 'Channel not found');
+    }
+    return {
+      channelName: channel.name,
+      channelSlug: channel.slug,
+      role: invite.role,
+      expiresAt: invite.expiresAt,
+    };
+  },
+
+  async joinViaInvite(userId: string, token: string) {
+    const invite = await this.assertValidInvite(token);
+    const channel = await channelRepository.findById(invite.channelId.toString());
+    if (!channel || channel.deletedAt) {
+      throw new AppError(404, 'CHANNEL_NOT_FOUND', 'Channel not found');
+    }
+    const channelId = channel._id.toString();
+    const existing = await channelRepository.findSubscriber(channelId, userId);
+    if (existing) {
+      let upgraded = false;
+      if (invite.role === 'ADMIN' && existing.role === 'SUBSCRIBER') {
+        await channelRepository.updateSubscriberRole(channelId, userId, 'ADMIN');
+        upgraded = true;
+      }
+      return {
+        channel: toSafeChannel(channel),
+        role: existing.role,
+        joined: false,
+        upgraded,
+      };
+    }
+    await channelRepository.addSubscriber(channelId, userId, invite.role);
+    await channelRepository.incrementSubscriberCount(channelId, 1);
+    await channelRepository.incrementInviteUsed(invite._id.toString());
+    return {
+      channel: toSafeChannel(channel),
+      role: invite.role,
+      joined: true,
+      upgraded: false,
+    };
+  },
+
+  async createJoinRequest(userId: string, identifier: string) {
+    const channel = await this.getChannelEntity(identifier);
+    if (channel.visibility === 'PUBLIC') {
+      throw new AppError(
+        400,
+        'PUBLIC_CHANNEL_OPEN',
+        'This channel is public — subscribe directly instead',
+      );
+    }
+    const channelId = channel._id.toString();
+    const existing = await channelRepository.findSubscriber(channelId, userId);
+    if (existing) {
+      throw new AppError(409, 'ALREADY_SUBSCRIBED', 'You are already a subscriber of this channel');
+    }
+    const pending = await channelRepository.findLiveJoinRequest(channelId, userId);
+    if (pending) {
+      throw new AppError(409, 'REQUEST_PENDING', 'You already have a pending join request');
+    }
+    await channelRepository.createJoinRequest(channelId, userId);
+  },
+
+  async listJoinRequests(
+    actorId: string,
+    identifier: string,
+    status: 'PENDING' | 'APPROVED' | 'DENIED',
+    page: number,
+    pageSize: number,
+  ) {
+    const channel = await this.getForAdmin(identifier, actorId, 'UPDATE');
+    const result = await channelRepository.listJoinRequests(channel.id, status, page, pageSize);
+    return {
+      items: result.items.map(({ request, displayName, avatarUrl }) => ({
+        userId: request.userId.toString(),
+        role: request.role,
+        status: request.status,
+        createdAt: request.createdAt,
+        decidedAt: request.decidedAt,
+        decidedBy: request.decidedBy ? request.decidedBy.toString() : null,
+        displayName,
+        avatarUrl,
+      })),
+      total: result.total,
+      page: result.page,
+      pageSize: result.pageSize,
+    };
+  },
+
+  async decideJoinRequest(
+    actorId: string,
+    identifier: string,
+    targetUserId: string,
+    action: 'APPROVE' | 'DENY',
+  ) {
+    const channel = await this.getForAdmin(identifier, actorId, 'UPDATE');
+    const request = await channelRepository.findLiveJoinRequest(channel.id, targetUserId);
+    if (!request) {
+      throw new AppError(404, 'REQUEST_NOT_FOUND', 'No pending join request for this user');
+    }
+    if (action === 'APPROVE') {
+      const existing = await channelRepository.findSubscriber(channel.id, targetUserId);
+      if (existing) {
+        throw new AppError(
+          409,
+          'ALREADY_SUBSCRIBED',
+          'User is already a subscriber of this channel',
+        );
+      }
+      await channelRepository.addSubscriber(channel.id, targetUserId, 'SUBSCRIBER');
+      await channelRepository.incrementSubscriberCount(channel.id, 1);
+    }
+    const status = action === 'APPROVE' ? 'APPROVED' : 'DENIED';
+    await channelRepository.setJoinRequestStatus(channel.id, targetUserId, status, actorId);
+  },
+
+  /**
+   * Fetches a channel without the S1 visibility gate. Only used by
+   * request-to-join — the requester is by definition not (yet) a subscriber,
+   * so `getChannel` would 403 them before they could even ask to join.
+   */
+  async getChannelEntity(identifier: string): Promise<ChannelDoc> {
+    const channel = await channelRepository.findByIdOrSlug(identifier);
+    if (!channel || channel.deletedAt) {
+      throw new AppError(404, 'CHANNEL_NOT_FOUND', 'Channel not found');
+    }
+    return channel;
+  },
+
+  async assertValidInvite(token: string): Promise<ChannelInviteDoc> {
+    const invite = await channelRepository.findInviteByTokenHash(sha256(token));
+    if (!invite) {
+      throw new AppError(404, 'INVITE_INVALID', 'Invite not found or no longer valid');
+    }
+    if (invite.revokedAt) {
+      throw new AppError(410, 'INVITE_GONE', 'This invite has been revoked');
+    }
+    if (invite.expiresAt.getTime() < Date.now()) {
+      throw new AppError(410, 'INVITE_GONE', 'This invite has expired');
+    }
+    if (invite.usedCount >= invite.maxUses) {
+      throw new AppError(410, 'INVITE_GONE', 'This invite has been used up');
+    }
+    return invite;
+  },
+
   /**
    * Shared S1 gate (Communities lesson): every read of a PRIVATE channel —
    * detail, subscriber list, and (from CH2) the post feed — goes through this
@@ -309,5 +501,19 @@ async function enrichWithSubscription(
       isSubscribed: roleByChannelId.has(c._id.toString()),
       role: roleByChannelId.get(c._id.toString()) ?? null,
     })),
+  };
+}
+
+function toSafeInvite(invite: ChannelInviteDoc) {
+  return {
+    id: invite._id.toString(),
+    channelId: invite.channelId.toString(),
+    createdBy: invite.createdBy.toString(),
+    role: invite.role,
+    expiresAt: invite.expiresAt,
+    usedCount: invite.usedCount,
+    maxUses: invite.maxUses,
+    revokedAt: invite.revokedAt,
+    createdAt: invite.createdAt,
   };
 }

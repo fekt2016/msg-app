@@ -21,6 +21,16 @@ vi.mock('./channel.repository.js', () => ({
     countSubscribers: vi.fn(),
     listSubscribers: vi.fn(),
     listSubscriptionsForUser: vi.fn(),
+    createInvite: vi.fn(),
+    findInviteByTokenHash: vi.fn(),
+    listActiveInvites: vi.fn(),
+    revokeInvite: vi.fn(),
+    incrementInviteUsed: vi.fn(),
+    createJoinRequest: vi.fn(),
+    findLiveJoinRequest: vi.fn(),
+    findJoinRequest: vi.fn(),
+    listJoinRequests: vi.fn(),
+    setJoinRequestStatus: vi.fn(),
   },
 }));
 
@@ -381,5 +391,338 @@ describe('channelService.listSubscribers', () => {
       code: 'PRIVATE_CHANNEL',
       statusCode: 403,
     });
+  });
+});
+
+function fakeInvite(overrides: Record<string, unknown> = {}) {
+  return {
+    _id: { toString: () => 'invite-1' },
+    channelId: { toString: () => 'channel-1' },
+    createdBy: { toString: () => 'user-1' },
+    tokenHash: 'hashed-token',
+    role: 'SUBSCRIBER',
+    expiresAt: new Date(Date.now() + 86400000),
+    usedCount: 0,
+    maxUses: 1,
+    revokedAt: null,
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    ...overrides,
+  } as never;
+}
+
+describe('channelService.createInvite', () => {
+  it('creates an invite and returns the raw token once', async () => {
+    repo.findByIdOrSlug.mockResolvedValue(fakeChannel());
+    repo.findSubscriber.mockResolvedValue({ role: 'OWNER' });
+    repo.createInvite.mockResolvedValue(fakeInvite());
+
+    const result = await channelService.createInvite('user-1', 'accra-news', {});
+
+    expect(result.token).toEqual(expect.any(String));
+    expect(result.token.length).toBeGreaterThanOrEqual(40);
+    expect(repo.createInvite).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'channel-1',
+        createdBy: 'user-1',
+        role: 'SUBSCRIBER',
+        maxUses: 1,
+      }),
+    );
+    expect(repo.createInvite).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tokenHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+      }),
+    );
+  });
+
+  it('forbids a plain subscriber from creating invites', async () => {
+    repo.findByIdOrSlug.mockResolvedValue(fakeChannel());
+    repo.findSubscriber.mockResolvedValue({ role: 'SUBSCRIBER' });
+
+    await expect(channelService.createInvite('user-9', 'accra-news', {})).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
+  });
+});
+
+describe('channelService.listInvites', () => {
+  it('lists active invites for a channel', async () => {
+    repo.findByIdOrSlug.mockResolvedValue(fakeChannel());
+    repo.findSubscriber.mockResolvedValue({ role: 'ADMIN' });
+    repo.listActiveInvites.mockResolvedValue([fakeInvite()]);
+
+    const result = await channelService.listInvites('user-1', 'accra-news');
+
+    expect(repo.listActiveInvites).toHaveBeenCalledWith('channel-1');
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].id).toBe('invite-1');
+  });
+});
+
+describe('channelService.revokeInvite', () => {
+  it('revokes an invite belonging to the channel', async () => {
+    repo.findByIdOrSlug.mockResolvedValue(fakeChannel());
+    repo.findSubscriber.mockResolvedValue({ role: 'OWNER' });
+    repo.revokeInvite.mockResolvedValue(fakeInvite());
+
+    await channelService.revokeInvite('user-1', 'accra-news', 'invite-1');
+
+    expect(repo.revokeInvite).toHaveBeenCalledWith('invite-1');
+  });
+
+  it('throws 404 when the invite does not exist', async () => {
+    repo.findByIdOrSlug.mockResolvedValue(fakeChannel());
+    repo.findSubscriber.mockResolvedValue({ role: 'OWNER' });
+    repo.revokeInvite.mockResolvedValue(null);
+
+    await expect(channelService.revokeInvite('user-1', 'accra-news', 'nope')).rejects.toMatchObject(
+      { code: 'INVITE_NOT_FOUND', statusCode: 404 },
+    );
+  });
+});
+
+describe('channelService.previewInvite', () => {
+  it('previews the channel name, role and expiry without side effects', async () => {
+    repo.findInviteByTokenHash.mockResolvedValue(fakeInvite());
+    repo.findById.mockResolvedValue(fakeChannel());
+
+    const result = await channelService.previewInvite('raw-token');
+
+    expect(repo.findInviteByTokenHash).toHaveBeenCalledWith(expect.any(String));
+    expect(result).toEqual(
+      expect.objectContaining({
+        channelName: 'Accra News',
+        channelSlug: 'accra-news',
+        role: 'SUBSCRIBER',
+      }),
+    );
+  });
+
+  it('throws 404 for an unknown token', async () => {
+    repo.findInviteByTokenHash.mockResolvedValue(null);
+
+    await expect(channelService.previewInvite('bad')).rejects.toMatchObject({
+      code: 'INVITE_INVALID',
+      statusCode: 404,
+    });
+  });
+
+  it('throws 410 for a revoked invite', async () => {
+    repo.findInviteByTokenHash.mockResolvedValue(fakeInvite({ revokedAt: new Date() }));
+
+    await expect(channelService.previewInvite('raw-token')).rejects.toMatchObject({
+      code: 'INVITE_GONE',
+      statusCode: 410,
+    });
+  });
+
+  it('throws 410 for an expired invite', async () => {
+    repo.findInviteByTokenHash.mockResolvedValue(
+      fakeInvite({ expiresAt: new Date(Date.now() - 1000) }),
+    );
+
+    await expect(channelService.previewInvite('raw-token')).rejects.toMatchObject({
+      code: 'INVITE_GONE',
+      statusCode: 410,
+    });
+  });
+
+  it('throws 410 for a used-up invite', async () => {
+    repo.findInviteByTokenHash.mockResolvedValue(fakeInvite({ usedCount: 1, maxUses: 1 }));
+
+    await expect(channelService.previewInvite('raw-token')).rejects.toMatchObject({
+      code: 'INVITE_GONE',
+      statusCode: 410,
+    });
+  });
+});
+
+describe('channelService.joinViaInvite', () => {
+  it('adds the user as a subscriber and consumes the invite', async () => {
+    repo.findInviteByTokenHash.mockResolvedValue(fakeInvite());
+    repo.findById.mockResolvedValue(fakeChannel());
+    repo.findSubscriber.mockResolvedValue(null);
+    repo.addSubscriber.mockResolvedValue({});
+    repo.incrementSubscriberCount.mockResolvedValue(undefined);
+    repo.incrementInviteUsed.mockResolvedValue(undefined);
+
+    const result = await channelService.joinViaInvite('user-2', 'raw-token');
+
+    expect(repo.addSubscriber).toHaveBeenCalledWith('channel-1', 'user-2', 'SUBSCRIBER');
+    expect(repo.incrementSubscriberCount).toHaveBeenCalledWith('channel-1', 1);
+    expect(repo.incrementInviteUsed).toHaveBeenCalledWith('invite-1');
+    expect(result).toEqual(expect.objectContaining({ joined: true, upgraded: false }));
+  });
+
+  it('returns a no-op for an already-subscribed user', async () => {
+    repo.findInviteByTokenHash.mockResolvedValue(fakeInvite());
+    repo.findById.mockResolvedValue(fakeChannel());
+    repo.findSubscriber.mockResolvedValue({ role: 'SUBSCRIBER' });
+
+    const result = await channelService.joinViaInvite('user-2', 'raw-token');
+
+    expect(repo.addSubscriber).not.toHaveBeenCalled();
+    expect(repo.incrementInviteUsed).not.toHaveBeenCalled();
+    expect(result).toEqual(
+      expect.objectContaining({ joined: false, upgraded: false, role: 'SUBSCRIBER' }),
+    );
+  });
+
+  it('upgrades a subscriber to admin when the invite grants admin', async () => {
+    repo.findInviteByTokenHash.mockResolvedValue(fakeInvite({ role: 'ADMIN' }));
+    repo.findById.mockResolvedValue(fakeChannel());
+    repo.findSubscriber.mockResolvedValue({ role: 'SUBSCRIBER' });
+    repo.updateSubscriberRole.mockResolvedValue({ role: 'ADMIN' });
+
+    const result = await channelService.joinViaInvite('user-2', 'raw-token');
+
+    expect(repo.updateSubscriberRole).toHaveBeenCalledWith('channel-1', 'user-2', 'ADMIN');
+    expect(result.upgraded).toBe(true);
+  });
+
+  it('never downgrades an existing admin', async () => {
+    repo.findInviteByTokenHash.mockResolvedValue(fakeInvite());
+    repo.findById.mockResolvedValue(fakeChannel());
+    repo.findSubscriber.mockResolvedValue({ role: 'ADMIN' });
+
+    const result = await channelService.joinViaInvite('user-2', 'raw-token');
+
+    expect(repo.updateSubscriberRole).not.toHaveBeenCalled();
+    expect(result.role).toBe('ADMIN');
+  });
+});
+
+describe('channelService.createJoinRequest', () => {
+  it('creates a pending request for a private channel', async () => {
+    repo.findByIdOrSlug.mockResolvedValue(fakeChannel({ visibility: 'PRIVATE' }));
+    repo.findSubscriber.mockResolvedValue(null);
+    repo.findLiveJoinRequest.mockResolvedValue(null);
+    repo.createJoinRequest.mockResolvedValue({});
+
+    await channelService.createJoinRequest('user-2', 'secret');
+
+    expect(repo.createJoinRequest).toHaveBeenCalledWith('channel-1', 'user-2');
+  });
+
+  it('rejects requests to public channels', async () => {
+    repo.findByIdOrSlug.mockResolvedValue(fakeChannel());
+
+    await expect(channelService.createJoinRequest('user-2', 'accra-news')).rejects.toMatchObject({
+      code: 'PUBLIC_CHANNEL_OPEN',
+      statusCode: 400,
+    });
+  });
+
+  it('conflicts when the user is already subscribed', async () => {
+    repo.findByIdOrSlug.mockResolvedValue(fakeChannel({ visibility: 'PRIVATE' }));
+    repo.findSubscriber.mockResolvedValue({ role: 'SUBSCRIBER' });
+
+    await expect(channelService.createJoinRequest('user-2', 'secret')).rejects.toMatchObject({
+      code: 'ALREADY_SUBSCRIBED',
+      statusCode: 409,
+    });
+  });
+
+  it('conflicts when a request is already pending', async () => {
+    repo.findByIdOrSlug.mockResolvedValue(fakeChannel({ visibility: 'PRIVATE' }));
+    repo.findSubscriber.mockResolvedValue(null);
+    repo.findLiveJoinRequest.mockResolvedValue({ status: 'PENDING' });
+
+    await expect(channelService.createJoinRequest('user-2', 'secret')).rejects.toMatchObject({
+      code: 'REQUEST_PENDING',
+      statusCode: 409,
+    });
+  });
+});
+
+describe('channelService.listJoinRequests', () => {
+  it('lists requests joined with requester display info', async () => {
+    repo.findByIdOrSlug.mockResolvedValue(fakeChannel());
+    repo.findSubscriber.mockResolvedValue({ role: 'OWNER' });
+    repo.listJoinRequests.mockResolvedValue({
+      items: [
+        {
+          request: {
+            userId: { toString: () => 'user-2' },
+            role: 'SUBSCRIBER',
+            status: 'PENDING',
+            createdAt: new Date(),
+            decidedAt: null,
+            decidedBy: null,
+          },
+          displayName: 'Kwame',
+          avatarUrl: 'https://img/k.png',
+        },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    });
+
+    const result = await channelService.listJoinRequests('user-1', 'accra-news', 'PENDING', 1, 20);
+
+    expect(repo.listJoinRequests).toHaveBeenCalledWith('channel-1', 'PENDING', 1, 20);
+    expect(result.items[0]).toMatchObject({ userId: 'user-2', displayName: 'Kwame' });
+  });
+});
+
+describe('channelService.decideJoinRequest', () => {
+  it('approves a request, creating the subscription row', async () => {
+    repo.findByIdOrSlug.mockResolvedValue(fakeChannel());
+    repo.findSubscriber.mockResolvedValueOnce({ role: 'OWNER' }).mockResolvedValueOnce(null);
+    repo.findLiveJoinRequest.mockResolvedValue({ status: 'PENDING' });
+    repo.addSubscriber.mockResolvedValue({});
+    repo.incrementSubscriberCount.mockResolvedValue(undefined);
+    repo.setJoinRequestStatus.mockResolvedValue({});
+
+    await channelService.decideJoinRequest('user-1', 'accra-news', 'user-2', 'APPROVE');
+
+    expect(repo.addSubscriber).toHaveBeenCalledWith('channel-1', 'user-2', 'SUBSCRIBER');
+    expect(repo.incrementSubscriberCount).toHaveBeenCalledWith('channel-1', 1);
+    expect(repo.setJoinRequestStatus).toHaveBeenCalledWith(
+      'channel-1',
+      'user-2',
+      'APPROVED',
+      'user-1',
+    );
+  });
+
+  it('denies a request without creating a subscription row', async () => {
+    repo.findByIdOrSlug.mockResolvedValue(fakeChannel());
+    repo.findSubscriber.mockResolvedValue({ role: 'OWNER' });
+    repo.findLiveJoinRequest.mockResolvedValue({ status: 'PENDING' });
+    repo.setJoinRequestStatus.mockResolvedValue({});
+
+    await channelService.decideJoinRequest('user-1', 'accra-news', 'user-2', 'DENY');
+
+    expect(repo.addSubscriber).not.toHaveBeenCalled();
+    expect(repo.setJoinRequestStatus).toHaveBeenCalledWith(
+      'channel-1',
+      'user-2',
+      'DENIED',
+      'user-1',
+    );
+  });
+
+  it('throws 404 when there is no pending request', async () => {
+    repo.findByIdOrSlug.mockResolvedValue(fakeChannel());
+    repo.findSubscriber.mockResolvedValue({ role: 'OWNER' });
+    repo.findLiveJoinRequest.mockResolvedValue(null);
+
+    await expect(
+      channelService.decideJoinRequest('user-1', 'accra-news', 'user-2', 'APPROVE'),
+    ).rejects.toMatchObject({ code: 'REQUEST_NOT_FOUND', statusCode: 404 });
+  });
+
+  it('conflicts when the target is already subscribed', async () => {
+    repo.findByIdOrSlug.mockResolvedValue(fakeChannel());
+    repo.findSubscriber
+      .mockResolvedValueOnce({ role: 'OWNER' })
+      .mockResolvedValueOnce({ role: 'SUBSCRIBER' });
+    repo.findLiveJoinRequest.mockResolvedValue({ status: 'PENDING' });
+
+    await expect(
+      channelService.decideJoinRequest('user-1', 'accra-news', 'user-2', 'APPROVE'),
+    ).rejects.toMatchObject({ code: 'ALREADY_SUBSCRIBED', statusCode: 409 });
   });
 });

@@ -5,6 +5,16 @@ import {
   type ChannelRole,
   type ChannelSubscriberDoc,
 } from './channelSubscriber.model.js';
+import {
+  ChannelInviteModel,
+  type InviteRole,
+  type ChannelInviteDoc,
+} from './channelInvite.model.js';
+import {
+  ChannelJoinRequestModel,
+  type JoinRequestStatus,
+  type ChannelJoinRequestDoc,
+} from './channelJoinRequest.model.js';
 import { userRepository } from '../auth/user.repository.js';
 
 export interface CreateChannelInput {
@@ -169,6 +179,97 @@ export const channelRepository = {
 
   async listSubscriptionsForUser(userId: string): Promise<ChannelSubscriberDoc[]> {
     return ChannelSubscriberModel.find({ userId });
+  },
+
+  async createInvite(input: {
+    channelId: string;
+    createdBy: string;
+    tokenHash: string;
+    role: InviteRole;
+    expiresAt: Date;
+    maxUses: number;
+  }): Promise<ChannelInviteDoc> {
+    return ChannelInviteModel.create(input);
+  },
+
+  async findInviteByTokenHash(tokenHash: string): Promise<ChannelInviteDoc | null> {
+    return ChannelInviteModel.findOne({ tokenHash });
+  },
+
+  async listActiveInvites(channelId: string): Promise<ChannelInviteDoc[]> {
+    return ChannelInviteModel.find({ channelId, revokedAt: null }).sort({ createdAt: -1 });
+  },
+
+  async revokeInvite(id: string): Promise<ChannelInviteDoc | null> {
+    return ChannelInviteModel.findByIdAndUpdate(
+      id,
+      { $set: { revokedAt: new Date() } },
+      { new: true },
+    );
+  },
+
+  async incrementInviteUsed(id: string): Promise<void> {
+    await ChannelInviteModel.updateOne({ _id: id }, { $inc: { usedCount: 1 } });
+  },
+
+  async createJoinRequest(channelId: string, userId: string): Promise<ChannelJoinRequestDoc> {
+    return ChannelJoinRequestModel.create({ channelId, userId });
+  },
+
+  async findLiveJoinRequest(
+    channelId: string,
+    userId: string,
+  ): Promise<ChannelJoinRequestDoc | null> {
+    return ChannelJoinRequestModel.findOne({ channelId, userId, status: 'PENDING' });
+  },
+
+  async findJoinRequest(channelId: string, userId: string): Promise<ChannelJoinRequestDoc | null> {
+    return ChannelJoinRequestModel.findOne({ channelId, userId }).sort({ createdAt: -1 });
+  },
+
+  async listJoinRequests(
+    channelId: string,
+    status: JoinRequestStatus,
+    page: number,
+    pageSize: number,
+  ): Promise<
+    Paginated<{ request: ChannelJoinRequestDoc; displayName: string; avatarUrl: string | null }>
+  > {
+    const [requests, total] = await Promise.all([
+      ChannelJoinRequestModel.find({ channelId, status })
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * pageSize)
+        .limit(pageSize),
+      ChannelJoinRequestModel.countDocuments({ channelId, status }),
+    ]);
+
+    const userIds = requests.map((r) => r.userId.toString());
+    const found = await userRepository.findByIds(userIds);
+    const users = new Map(found.map((u) => [u._id.toString(), u]));
+
+    const items = requests.map((request) => {
+      const user = users.get(request.userId.toString());
+      return {
+        request,
+        displayName: user?.displayName ?? 'Unknown',
+        avatarUrl: user?.avatar?.url ?? null,
+      };
+    });
+
+    return { items, total, page, pageSize };
+  },
+
+  async setJoinRequestStatus(
+    channelId: string,
+    userId: string,
+    status: Extract<JoinRequestStatus, 'APPROVED' | 'DENIED'>,
+    decidedBy: string,
+  ): Promise<ChannelJoinRequestDoc | null> {
+    return ChannelJoinRequestModel.findOneAndUpdate(
+      { channelId, userId, status: 'PENDING' },
+      { $set: { status, decidedAt: new Date(), decidedBy } },
+      { new: true },
+    );
   },
 };
 
