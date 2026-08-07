@@ -9,6 +9,7 @@ import { healthRouter } from './routes/health.routes.js';
 import authRouter from './modules/auth/auth.routes.js';
 import userRouter from './modules/users/user.routes.js';
 import communityRouter from './modules/communities/community.routes.js';
+import { channelRouter } from './modules/channels/channel.routes.js';
 import groupRouter from './modules/groups/group.routes.js';
 import messageRouter from './modules/messages/message.routes.js';
 import { e2eeRouter } from './modules/e2ee/e2ee.routes.js';
@@ -64,6 +65,7 @@ export function createApp(): Express {
   apiV1.use('/auth', authRouter);
   apiV1.use('/users', userRouter);
   apiV1.use('/communities', communityRouter);
+  apiV1.use('/channels', channelRouter);
   apiV1.use('/groups', groupRouter);
   apiV1.use('/messages', messageRouter);
   apiV1.use('/e2ee/recovery', recoveryBackupRouter);
