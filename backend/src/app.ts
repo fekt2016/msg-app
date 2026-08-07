@@ -15,6 +15,7 @@ import { e2eeRouter } from './modules/e2ee/e2ee.routes.js';
 import { groupKeyRouter } from './modules/e2ee/groupKey.routes.js';
 import { recoveryBackupRouter } from './modules/e2ee/recoveryBackup.routes.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
+import { buildRateLimitStore } from './middleware/rateLimitStore.js';
 
 export function createApp(): Express {
   const app = express();
@@ -33,6 +34,7 @@ export function createApp(): Express {
       max: env.RATE_LIMIT_MAX,
       standardHeaders: true,
       legacyHeaders: false,
+      store: buildRateLimitStore(env.RATE_LIMIT_WINDOW_MS),
     }),
   );
 
@@ -41,6 +43,7 @@ export function createApp(): Express {
     max: env.AUTH_RATE_LIMIT_MAX,
     standardHeaders: true,
     legacyHeaders: false,
+    store: buildRateLimitStore(env.AUTH_RATE_LIMIT_WINDOW_MS),
   });
 
   const otpLimiter = rateLimit({
@@ -48,6 +51,7 @@ export function createApp(): Express {
     max: env.OTP_RATE_LIMIT_MAX,
     standardHeaders: true,
     legacyHeaders: false,
+    store: buildRateLimitStore(env.OTP_RATE_LIMIT_WINDOW_MS),
   });
 
   app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
