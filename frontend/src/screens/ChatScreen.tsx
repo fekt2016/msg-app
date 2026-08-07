@@ -30,7 +30,14 @@ type Props = NativeStackScreenProps<AppStackParamList, 'Chat'>;
 interface ChatMessage {
   id: string;
   senderId: string;
-  ciphertext: string;
+  /**
+   * The text to render: decrypted plaintext, or `null` when this device could
+   * not decrypt the message (e.g. the identity key was rotated/regenerated, so
+   * the ciphertext is no longer decryptable here). It is NEVER the raw
+   * ciphertext — encrypted bytes must not be rendered as if they were the
+   * message. A `null` value drives an explicit "can't decrypt" bubble.
+   */
+  text: string | null;
   timestamp: number;
   isOwn: boolean;
   delivered: boolean;
@@ -44,8 +51,8 @@ interface ChatMessage {
  * Decrypts a persisted message fetched from the history endpoint. ECDH shared
  * secrets are symmetric, so the same secret derived from our identity private
  * key and the peer's identity public key works whether the message is ours or
- * theirs. On any failure the raw ciphertext preview is kept (mirrors the live
- * incoming path).
+ * theirs. On any failure `text` is left `null` (mirrors the live incoming path)
+ * so the row renders an explicit undecryptable state — never the raw ciphertext.
  */
 async function decryptStoredMessage(
   stored: StoredMessage,
@@ -53,7 +60,7 @@ async function decryptStoredMessage(
 ): Promise<ChatMessage | null> {
   const isOwn = stored.senderId === currentUserId;
   const peerId = isOwn ? stored.recipientId : stored.senderId;
-  let ciphertext = stored.ciphertext;
+  let text: string | null = null;
   let verificationFailed = false;
   try {
     const ourBundle = await keyStore.getKeyBundle();
@@ -66,16 +73,18 @@ async function decryptStoredMessage(
           ourBundle.identityKey.privateKey,
           peerBundle.identityKey.publicKey,
         );
-        ciphertext = await decryptMessage(sharedSecret, stored.ciphertext, stored.iv);
+        text = await decryptMessage(sharedSecret, stored.ciphertext, stored.iv);
       }
     }
   } catch {
-    // Keep the raw ciphertext preview if decryption fails.
+    // Decryption failed (missing/rotated keys) — leave `text` null so the row
+    // renders an explicit "can't decrypt" state. Never fall back to showing the
+    // raw ciphertext as if it were the message.
   }
   return {
     id: stored.id,
     senderId: stored.senderId,
-    ciphertext,
+    text,
     timestamp: stored.timestamp,
     isOwn,
     delivered: true,
@@ -170,7 +179,7 @@ export function ChatScreen({ route, navigation }: Props) {
         // `userId` is the peer for this thread, so this also drops self-echoes.
         if (payload.senderId !== userId) return;
 
-        let ciphertext = payload.ciphertext;
+        let text: string | null = null;
         let verificationFailed = false;
         try {
           const ourBundle = await keyStore.getKeyBundle();
@@ -184,18 +193,18 @@ export function ChatScreen({ route, navigation }: Props) {
                 ourBundle.identityKey.privateKey,
                 senderBundle.identityKey.publicKey,
               );
-              const plaintext = await decryptMessage(sharedSecret, payload.ciphertext, payload.iv);
-              ciphertext = plaintext;
+              text = await decryptMessage(sharedSecret, payload.ciphertext, payload.iv);
             }
           }
         } catch {
-          // Keep the raw ciphertext preview if decryption fails.
+          // Decryption failed — leave `text` null so the bubble shows an explicit
+          // "can't decrypt" state, never the raw ciphertext.
         }
 
         const incoming: ChatMessage = {
           id: `${payload.senderId}-${payload.timestamp}`,
           senderId: payload.senderId,
-          ciphertext,
+          text,
           timestamp: payload.timestamp,
           isOwn: false,
           delivered: true,
@@ -268,7 +277,7 @@ export function ChatScreen({ route, navigation }: Props) {
       const queued: ChatMessage[] = mine.map((m) => ({
         id: m.id,
         senderId: m.senderId,
-        ciphertext: m.text,
+        text: m.text,
         timestamp: m.timestamp,
         isOwn: true,
         delivered: false,
@@ -320,9 +329,9 @@ export function ChatScreen({ route, navigation }: Props) {
       id: messageId,
       senderId: currentUserId,
       // Show the readable text we just typed in our own bubble; the encrypted
-      // `ciphertext` is what goes over the wire, never displayed to us.
-      // Mirrors the incoming path, which stores decrypted plaintext here too.
-      ciphertext: text,
+      // body is what goes over the wire, never displayed to us. Mirrors the
+      // incoming path, which stores decrypted plaintext in `text` too.
+      text,
       timestamp,
       isOwn: true,
       delivered: false,
@@ -443,9 +452,13 @@ export function ChatScreen({ route, navigation }: Props) {
                 <Text style={styles.messageWarning}>
                   ⚠ Could not verify sender&apos;s keys — message not shown
                 </Text>
+              ) : item.text === null ? (
+                <Text style={styles.messageWarning}>
+                  🔒 This message can&apos;t be decrypted on this device
+                </Text>
               ) : (
                 <Text style={item.isOwn ? styles.messageText : styles.otherMessageText}>
-                  {item.ciphertext}
+                  {item.text}
                 </Text>
               )}
               <View style={styles.messageMeta}>
