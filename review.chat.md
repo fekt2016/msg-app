@@ -28,7 +28,7 @@
 
 ## 2. Verdict
 
-**Merge-ready pending CI confirmation.** All blocking bugs (F1–F3, R1–R3), the notes (N1/N2/N6), the security HIGH+LOW (§10, ADR 0004 forward-only + `createdAt` sort), and the actionable code-review nits (§11 L3/L4/L5) are fixed with regression tests. **Security re-verify: HIGH cleared.** **Code review: APPROVE, no blocking/high.** `lint`/`typecheck` clean; full suite green (backend 330/330, frontend 189/189 at `--maxWorkers=2`; the two heavy screen suites time out only under unbounded parallel load — an unrelated, pre-existing test-runner flake). Deferred (documented, not blocking): N3 (load-more/pagination), N4 (shared envelope types), N5 (`ciphertext` field naming), N7 (recipient-exists relay guard), L1 (persist-path dedup index), L2 (live-handler dedup, with N6), L6 (collection-name normalization → refactoring), `page` deep-skip → performance. **Remaining before the box is checked: confirm the GitHub CI run is green, then merge.**
+**Merge-ready pending CI confirmation.** All blocking bugs (F1–F3, R1–R3), the notes (N1/N2/N6), the security HIGH+LOW (§10, ADR 0004 forward-only + `createdAt` sort), and the actionable code-review nits (§11 L3/L4/L5) are fixed with regression tests. **Security re-verify: HIGH cleared.** **Code review: APPROVE, no blocking/high.** `lint`/`typecheck` clean; full suite green (backend 330/330, frontend 189/189 at `--maxWorkers=2`; the two heavy screen suites time out only under unbounded parallel load — an unrelated, pre-existing test-runner flake). Deferred (documented, not blocking): N3 (load-more/pagination), N4 (shared envelope types), N5 (`ciphertext` field naming), N7 (recipient-exists relay guard), L1 (persist-path dedup index), L2 (live-handler dedup, with N6), L6 (collection-name normalization → refactoring), `page` deep-skip → performance. **CI gate waived by repo owner (2026-08-07):** rather than block on the GitHub Actions run, all four checks CI runs were reproduced locally and are green — `pnpm -r lint`, `pnpm -r typecheck`, `pnpm -r test` (backend 330/330, frontend 189/189), and `pnpm -r build` (backend `tsc` + frontend Expo web/ios/android export). This is a deliberate deviation from CLAUDE.md §16's "required status check" — noted here so the waiver is on record, not silent. **Ready to merge.**
 
 ---
 
@@ -118,9 +118,10 @@ The server relays `chat:message:new` to the recipient's own room (`io.to('user:'
 - [x] **R2** merge ordering (fixed with R1)
 - [x] **R3** conversation-scoped incoming filter (fixed + regression test)
 - [x] **N1** full-text message rendering (fixed)
-- [x] `pnpm lint` / `pnpm typecheck` green both workspaces; `pnpm test` green — backend 330/330, frontend 189/189 (the two heavy screen suites time out only under full-parallel load; green isolated and at `--maxWorkers=2`)
+- [x] `pnpm lint` / `pnpm typecheck` / `pnpm test` / `pnpm build` green both workspaces — backend 330/330, frontend 189/189 (heavy screen suites time out only under full-parallel load; green isolated and at `--maxWorkers=2`)
 - [x] Documentation/`.opencode/TASKS.md` updated for the fixed + remaining items
-- [ ] Merged
+- [~] CI status check — **waived by repo owner**; all four CI checks reproduced green locally (see §2)
+- [ ] Merged (branch pushed; PR opened manually)
 
 ---
 
