@@ -616,6 +616,56 @@ describe('ChatScreen delivery and read status', () => {
     expect(screen.queryByText(/decrypted hello/)).toBeNull();
   });
 
+  it('shows a "can\'t decrypt" state (never the raw ciphertext) for undecryptable history', async () => {
+    // Identity rotated/regenerated since these were sent — the ciphertext no
+    // longer decrypts on this device. The bubble must show an explicit state,
+    // not render the base64 ciphertext as if it were the message text.
+    mockCrypto.decryptMessage.mockRejectedValue(new Error('bad auth tag'));
+    mockApiClient.get.mockResolvedValue({
+      data: {
+        data: [
+          {
+            id: 'm1',
+            senderId: 'u1',
+            recipientId: 'u2',
+            ciphertext: 'ct-garbage-base64',
+            iv: 'iv-hist',
+            timestamp: 1000,
+          },
+        ],
+        meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 },
+      },
+    });
+    const { socket } = makeSocket();
+    await renderChat(socket);
+
+    await waitFor(() => {
+      expect(screen.getByText(/can.t be decrypted on this device/)).toBeOnTheScreen();
+    });
+    // The raw ciphertext must never appear on screen.
+    expect(screen.queryByText(/ct-garbage-base64/)).toBeNull();
+  });
+
+  it('shows a "can\'t decrypt" state (never the raw ciphertext) for an undecryptable live message', async () => {
+    mockCrypto.decryptMessage.mockRejectedValue(new Error('bad auth tag'));
+    const { socket, emit } = makeSocket();
+    await renderChat(socket);
+
+    await act(async () => {
+      emit('chat:message:new', {
+        senderId: 'u2',
+        ciphertext: 'ct-garbage-live',
+        iv: 'iv-in',
+        timestamp: 12345,
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/can.t be decrypted on this device/)).toBeOnTheScreen();
+    });
+    expect(screen.queryByText(/ct-garbage-live/)).toBeNull();
+  });
+
   it('navigates back when the back arrow is pressed', async () => {
     const { socket } = makeSocket();
     const navigation = { goBack: jest.fn() };
