@@ -119,6 +119,55 @@ describe('GroupChatScreen', () => {
     expect(mockSession.ensureOwnSenderKeyDistributed).toHaveBeenCalledTimes(1);
   });
 
+  it('re-attempts a rotate (never falls back to ensure) after a failed join-rotation', async () => {
+    // A transient rotation failure leaves the old key current; the next roster
+    // change must still rotate — not re-share the old key via ensure.
+    mockSession.rotateOwnSenderKey.mockRejectedValueOnce(new Error('boom'));
+    const { view, navigation } = await renderScreen();
+    await waitFor(() => expect(mockSession.ensureOwnSenderKeyDistributed).toHaveBeenCalledTimes(1));
+
+    // u3 joins → rotate is attempted and fails.
+    mockUseMembers.mockReturnValue({
+      data: {
+        items: [
+          { userId: 'me', displayName: 'Me' },
+          { userId: 'u2', displayName: 'Bob' },
+          { userId: 'u3', displayName: 'Ama' },
+        ],
+      },
+    });
+    await act(async () => {
+      view.rerender(screenElement(navigation));
+    });
+    await waitFor(() => expect(mockSession.rotateOwnSenderKey).toHaveBeenCalledTimes(1));
+
+    // u4 joins next → must rotate to the full roster (still including u3), and
+    // must NOT downgrade to ensure (which would re-share the old key).
+    mockUseMembers.mockReturnValue({
+      data: {
+        items: [
+          { userId: 'me', displayName: 'Me' },
+          { userId: 'u2', displayName: 'Bob' },
+          { userId: 'u3', displayName: 'Ama' },
+          { userId: 'u4', displayName: 'Kofi' },
+        ],
+      },
+    });
+    await act(async () => {
+      view.rerender(screenElement(navigation));
+    });
+
+    await waitFor(() =>
+      expect(mockSession.rotateOwnSenderKey).toHaveBeenCalledWith(
+        'g1',
+        ['me', 'u2', 'u3', 'u4'],
+        'me',
+      ),
+    );
+    // ensure only ran once (the initial bootstrap) — the retry never fell back to it.
+    expect(mockSession.ensureOwnSenderKeyDistributed).toHaveBeenCalledTimes(1);
+  });
+
   it('encrypts and emits a message on send', async () => {
     mockSession.encryptGroupMessage.mockResolvedValue({ ciphertext: 'ct', iv: 'iv', keyId: 3 });
     await renderScreen();

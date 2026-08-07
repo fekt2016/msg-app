@@ -160,8 +160,12 @@ export function GroupChatScreen({ route, navigation }: Props) {
     void distribute.catch((err) => {
       // Most often the caller's own key bundle isn't ready yet (see
       // ensureE2eeKeysRegistered) — allow a retry on the next roster change
-      // rather than latching a permanent failure.
-      knownRosterRef.current = null;
+      // rather than latching a permanent failure. Revert to the PREVIOUS known
+      // roster (not null): a failed join-rotation left the old key current, so
+      // the next run must still see the newcomer as `added` and re-attempt a
+      // rotate — resetting to null would downgrade the retry to `ensure` and
+      // re-share the old key to the newcomer at the crypto layer.
+      knownRosterRef.current = prev;
       if (added.length > 0) {
         console.error('[group-e2ee] sender-key rotation after member-join failed:', err);
       }
