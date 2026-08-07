@@ -273,6 +273,9 @@ describe('AuthContext', () => {
 
     expect(mockSecure.deleteItemAsync).toHaveBeenCalled();
     expect(result.current.isAuthenticated).toBe(false);
+    // Involuntary sign-out must also clear the plaintext outbox — otherwise a
+    // user's queued drafts survive into the next user's session on this device.
+    expect(mockOutboxStore.clear).toHaveBeenCalled();
   });
 
   it('does not refresh auth endpoints', async () => {

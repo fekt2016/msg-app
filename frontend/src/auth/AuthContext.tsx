@@ -56,6 +56,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<StoredUser | null>(null);
   const [deviceId, setDeviceId] = useState<string | null>(null);
 
+  // Single session-teardown path. Queued drafts are plaintext held on this
+  // device for the current user — never leave them readable by whoever signs in
+  // next on the same device. This MUST run on involuntary sign-out (refresh
+  // failure in the interceptor) as well as the explicit logout button, so both
+  // paths call this one helper and can't drift apart.
+  const clearSession = useCallback(async () => {
+    await tokenStorage.clear();
+    await outboxStore.clear();
+    setUser(null);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -144,14 +155,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           config.headers.Authorization = `Bearer ${accessToken}`;
           return apiClient.request(config);
         } catch {
-          await tokenStorage.clear();
-          setUser(null);
+          // Involuntary sign-out — clear the plaintext outbox too, not just tokens.
+          await clearSession();
           return Promise.reject(error);
         }
       },
     );
     return () => apiClient.interceptors.response.eject(interceptor);
-  }, []);
+  }, [clearSession]);
 
   const persistSession = useCallback(async (result: authApi.AuthResult) => {
     await tokenStorage.set(result.accessToken, result.refreshToken, toStoredUser(result.user));
@@ -211,13 +222,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Refresh token already invalid; nothing to revoke server-side.
       }
     } finally {
-      await tokenStorage.clear();
-      // Queued drafts are plaintext held on this device for the current user —
-      // never leave them readable by whoever signs in next on the same device.
-      await outboxStore.clear();
-      setUser(null);
+      await clearSession();
     }
-  }, []);
+  }, [clearSession]);
 
   const refreshProfile = useCallback(async () => {
     const profile = await getMyProfile();

@@ -366,4 +366,34 @@ describe('flushOutbox', () => {
     expect(result.sentIds).toEqual([]);
     expect(mockE2eeApi.sendEncryptedMessage).not.toHaveBeenCalled();
   });
+
+  it('coalesces concurrent flushes so each draft is sent exactly once', async () => {
+    const stored = [
+      {
+        id: 'u1-1000',
+        senderId: 'u1',
+        recipientId: 'u2',
+        text: 'hello',
+        timestamp: 1000,
+        queuedAt: Date.now(),
+      },
+    ];
+    mockSecure.getItemAsync.mockImplementation((key: string) =>
+      key === OUTBOX_KEY ? JSON.stringify(stored) : null,
+    );
+
+    // Two overlapping triggers (e.g. the 30s interval firing while a chat
+    // mounts) must not both send the draft — the second call joins the first's
+    // in-flight run rather than starting a second read-and-send.
+    const [r1, r2] = await Promise.all([flushOutbox('u1'), flushOutbox('u1')]);
+
+    expect(r1).toBe(r2);
+    expect(r1.sentIds).toEqual(['u1-1000']);
+    expect(mockE2eeApi.sendEncryptedMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('never throws when the secure store read fails', async () => {
+    mockSecure.getItemAsync.mockRejectedValue(new Error('secure store unavailable'));
+    await expect(flushOutbox('u1')).resolves.toEqual({ sentIds: [], failedIds: [] });
+  });
 });

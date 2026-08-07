@@ -22,6 +22,11 @@ import { REALTIME_EVENTS, realtimeClient } from '../realtime/client';
 
 const OUTBOX_KEY = 'e2ee_outbox';
 const OUTBOX_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+// Bound the queue so a stream of drafts to a keyless contact can't grow the
+// single SecureStore blob without limit (Android SecureStore values over ~2KB
+// may fail to write). Newest entries win. A larger/size-aware store is tracked
+// as a follow-up.
+const OUTBOX_MAX_ENTRIES = 200;
 
 export interface QueuedMessage {
   id: string;
@@ -36,8 +41,7 @@ export interface QueuedMessage {
 export type SendFailureReason =
   'KEYS_NOT_READY' | 'NO_KEYS' | 'VERIFICATION_FAILED' | 'SEND_FAILED';
 
-export type SendDraftResult =
-  { ok: true } | { ok: false; reason: SendFailureReason; error?: unknown };
+export type SendDraftResult = { ok: true } | { ok: false; reason: SendFailureReason };
 
 export interface SendDraftInput {
   senderId: string;
@@ -69,7 +73,10 @@ export const outboxStore = {
     try {
       const parsed = JSON.parse(raw) as QueuedMessage[];
       return Array.isArray(parsed) ? parsed : [];
-    } catch {
+    } catch (err) {
+      // Corrupt payload — discard rather than crash, but surface it (§15: no
+      // silently-swallowed errors) since it means queued drafts were lost.
+      console.warn('[outbox] discarding corrupt queue payload:', err);
       return [];
     }
   },
@@ -78,7 +85,10 @@ export const outboxStore = {
     await withOutboxLock(async () => {
       const current = await outboxStore.list();
       if (current.some((m) => m.id === message.id)) return;
-      await SecureStore.setItemAsync(OUTBOX_KEY, JSON.stringify([...current, message]));
+      const next = [...current, message];
+      const capped =
+        next.length > OUTBOX_MAX_ENTRIES ? next.slice(next.length - OUTBOX_MAX_ENTRIES) : next;
+      await SecureStore.setItemAsync(OUTBOX_KEY, JSON.stringify(capped));
     });
   },
 
@@ -150,9 +160,20 @@ export async function sendChatDraft(input: SendDraftInput): Promise<SendDraftRes
     });
     return { ok: true };
   } catch (err) {
-    return { ok: false, reason: 'SEND_FAILED', error: err };
+    // Transient send failure (network/server) — log the cause once; the caller
+    // keeps the draft queued for the next flush. Never throws, so an un-awaited
+    // trigger site can't raise an unhandled rejection.
+    console.warn('[outbox] send failed, will retry:', err);
+    return { ok: false, reason: 'SEND_FAILED' };
   }
 }
+
+// Coalesces overlapping flushes. There are many fire-and-forget trigger sites
+// (session restore, the 30s interval, chat mount/reconnect/post-send) that can
+// call flushOutbox concurrently. Without coalescing, two overlapping runs both
+// read the same queue and both send every draft — a duplicate live emit AND a
+// duplicate server persist. A single in-flight run is shared by all callers.
+let flushInFlight: Promise<FlushOutboxResult> | null = null;
 
 /**
  * Drains the on-device outbox for `userId`, re-attempting every queued draft
@@ -160,8 +181,29 @@ export async function sendChatDraft(input: SendDraftInput): Promise<SendDraftRes
  * has keys (or our connection is back); anything still unsendable stays queued
  * for the next flush. Entries older than OUTBOX_MAX_AGE_MS are dropped so
  * plaintext is never retained indefinitely at rest.
+ *
+ * Concurrent calls are coalesced into one run, and the function never throws (a
+ * SecureStore failure resolves to an empty result) so the un-awaited trigger
+ * sites can't raise an unhandled rejection.
  */
-export async function flushOutbox(userId: string): Promise<FlushOutboxResult> {
+export function flushOutbox(userId: string): Promise<FlushOutboxResult> {
+  if (flushInFlight) return flushInFlight;
+  flushInFlight = runFlush(userId).finally(() => {
+    flushInFlight = null;
+  });
+  return flushInFlight;
+}
+
+async function runFlush(userId: string): Promise<FlushOutboxResult> {
+  try {
+    return await drainOutbox(userId);
+  } catch (err) {
+    console.warn('[outbox] flush failed:', err);
+    return { sentIds: [], failedIds: [] };
+  }
+}
+
+async function drainOutbox(userId: string): Promise<FlushOutboxResult> {
   const queue = await outboxStore.list();
   const mine = queue.filter((m) => m.senderId === userId);
   if (mine.length === 0) return { sentIds: [], failedIds: [] };
