@@ -33,8 +33,14 @@ describe('recovery phrase', () => {
 
   it('rejects a phrase with a broken checksum or unknown word', () => {
     const phrase = generateRecoveryPhrase();
-    const broken = phrase.split(' ').slice(0, 23).concat('zoo').join(' ');
-    expect(isValidRecoveryPhrase(broken)).toBe(false);
+    // Flip an interior entropy word (not the last/checksum word): the recomputed
+    // checksum can never match the unchanged last word, so this is deterministic.
+    // Replacing the LAST word would instead have a ~1/2048 chance of landing on
+    // the one valid checksum word for the random entropy and flaking.
+    const words = phrase.split(' ');
+    const broken = [...words];
+    broken[5] = words[5] === 'ability' ? 'abandon' : 'ability';
+    expect(isValidRecoveryPhrase(broken.join(' '))).toBe(false);
     expect(isValidRecoveryPhrase('not real words at all')).toBe(false);
   });
 });

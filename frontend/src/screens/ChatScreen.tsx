@@ -17,15 +17,11 @@ import { useRealtime } from '../realtime/RealtimeProvider';
 import { useConversationMessages } from '../hooks/useConversationMessages';
 import type { StoredMessage } from '../api/messages';
 import { realtimeClient, REALTIME_EVENTS, type EncryptedMessageEvent } from '../realtime/client';
-import {
-  encryptMessage,
-  decryptMessage,
-  buildSharedSecret,
-  verifyPreKeySignature,
-} from '../e2ee/crypto';
-import type { E2eePublicKeyBundle } from '../e2ee/types';
+import { decryptMessage, buildSharedSecret } from '../e2ee/crypto';
+import { isPeerBundleVerified } from '../e2ee/verify';
 import { keyStore } from '../e2ee/keyStore';
-import { sendEncryptedMessage, fetchKeyBundle } from '../e2ee/e2eeApi';
+import { fetchKeyBundle } from '../e2ee/e2eeApi';
+import { sendChatDraft, flushOutbox, outboxStore, subscribeToOutbox } from '../e2ee/outbox';
 import type { AppStackParamList } from '../navigation/types';
 import { colors, spacing, radius } from '../theme/tokens';
 
@@ -40,26 +36,8 @@ interface ChatMessage {
   delivered: boolean;
   read: boolean;
   verificationFailed?: boolean;
-}
-
-/**
- * Authenticates a fetched peer bundle before any of its public keys are used for
- * key agreement (B-1). Verifies the signed-pre-key's ECDSA signature against the
- * peer's identity signing key; a tampered/forged bundle from a malicious relay
- * fails here and the caller refuses to encrypt/decrypt with it. This does not by
- * itself pin the identity key (there is no TOFU yet — that is the X3DH follow-up
- * in TASKS.md), but it defeats a relay that cannot also forge the signing key.
- */
-async function isPeerBundleVerified(bundle: E2eePublicKeyBundle): Promise<boolean> {
-  const signingKey = bundle.identityKey?.signingPublicKey;
-  const preKey = bundle.signedPreKey?.publicKey;
-  const signature = bundle.signedPreKey?.signature;
-  if (!signingKey || !preKey || !signature) return false;
-  try {
-    return await verifyPreKeySignature(signingKey, preKey, signature);
-  } catch {
-    return false;
-  }
+  /** True while the draft is held in the on-device outbox awaiting delivery. */
+  queued?: boolean;
 }
 
 /**
@@ -106,7 +84,18 @@ async function decryptStoredMessage(
   };
 }
 
-function StatusTicks({ delivered, read }: { delivered: boolean; read: boolean }) {
+function StatusTicks({
+  delivered,
+  read,
+  queued,
+}: {
+  delivered: boolean;
+  read: boolean;
+  queued?: boolean;
+}) {
+  if (queued) {
+    return <Text style={styles.statusTicks}>Pending…</Text>;
+  }
   if (read) {
     return <Text style={styles.statusTicksRead}>✓✓</Text>;
   }
@@ -265,69 +254,127 @@ export function ChatScreen({ route, navigation }: Props) {
     };
   }, [currentUserId, userId]);
 
+  // Load this conversation's pending drafts from the on-device outbox so a
+  // message queued earlier (contact had no keys / we were offline) still shows
+  // in the thread, then retry sending them.
+  useEffect(() => {
+    if (!currentUserId) return;
+    let cancelled = false;
+    void (async () => {
+      const pending = await outboxStore.list();
+      if (cancelled) return;
+      const mine = pending.filter((m) => m.recipientId === userId && m.senderId === currentUserId);
+      if (mine.length === 0) return;
+      const queued: ChatMessage[] = mine.map((m) => ({
+        id: m.id,
+        senderId: m.senderId,
+        ciphertext: m.text,
+        timestamp: m.timestamp,
+        isOwn: true,
+        delivered: false,
+        read: false,
+        queued: true,
+      }));
+      setMessages((prev) => {
+        const fresh = queued.filter(
+          (q) =>
+            !prev.some((existing) => existing.id === q.id || existing.timestamp === q.timestamp),
+        );
+        if (fresh.length === 0) return prev;
+        return [...prev, ...fresh].sort((a, b) => a.timestamp - b.timestamp);
+      });
+      void flushOutbox(currentUserId);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, currentUserId]);
+
+  // When the socket reconnects, retry any drafts still in the outbox — the
+  // recipient's keys may have been published while we were away.
+  useEffect(() => {
+    if (!connected || !currentUserId) return;
+    void flushOutbox(currentUserId);
+  }, [connected, currentUserId]);
+
+  // Reflect outbox deliveries in the thread: when a flush finally sends a
+  // queued draft, flip its bubble from "Pending…" to sent.
+  useEffect(() => {
+    if (!currentUserId) return;
+    return subscribeToOutbox(({ sentIds }) => {
+      if (sentIds.length === 0) return;
+      setMessages((prev) =>
+        prev.map((m) => (sentIds.includes(m.id) ? { ...m, queued: false } : m)),
+      );
+    });
+  }, [currentUserId]);
+
   const handleSend = useCallback(async () => {
     const text = inputText.trim();
     if (!text) return;
     if (!currentUserId) return;
 
-    const keyBundle = await keyStore.getKeyBundle();
-    if (!keyBundle) {
-      setKeyError('Your encryption keys are still being set up. Try again in a moment.');
-      return;
-    }
-
-    const recipientBundle = await fetchKeyBundle(userId).catch(() => null);
-    if (!recipientBundle?.identityKey?.publicKey) {
-      setKeyError('This contact has not set up encryption yet, so messages can’t be sent.');
-      return;
-    }
-
-    // B-1: refuse to encrypt to a recipient whose bundle fails signature
-    // verification (possible MITM / tampered directory entry).
-    if (!(await isPeerBundleVerified(recipientBundle))) {
-      setKeyError("Could not verify this contact's encryption keys. Message not sent.");
-      return;
-    }
-    setKeyError(null);
-
-    const sharedSecret = await buildSharedSecret(
-      keyBundle.identityKey.privateKey,
-      recipientBundle.identityKey.publicKey,
-    );
-
-    const { ciphertext, iv } = await encryptMessage(sharedSecret, text);
     const timestamp = Date.now();
-
-    const newMessage: ChatMessage = {
-      id: `${currentUserId}-${timestamp}`,
+    const messageId = `${currentUserId}-${timestamp}`;
+    const optimistic: ChatMessage = {
+      id: messageId,
       senderId: currentUserId,
       // Show the readable text we just typed in our own bubble; the encrypted
-      // `ciphertext` is what goes over the wire (below), never displayed to us.
+      // `ciphertext` is what goes over the wire, never displayed to us.
       // Mirrors the incoming path, which stores decrypted plaintext here too.
       ciphertext: text,
       timestamp,
       isOwn: true,
       delivered: false,
       read: false,
+      queued: true,
     };
-
-    setMessages((prev) => [...prev, newMessage]);
+    setMessages((prev) => [...prev, optimistic]);
     setInputText('');
 
     const socket = realtimeClient.connect();
-    socket.emit(REALTIME_EVENTS.CHAT_MESSAGE_NEW, {
-      recipientId: userId,
-      ciphertext,
-      iv,
-      timestamp,
-    });
-
-    await sendEncryptedMessage({
+    const result = await sendChatDraft({
       senderId: currentUserId,
       recipientId: userId,
-      ciphertext,
+      text,
       timestamp,
+      socket,
     });
+
+    if (result.ok) {
+      setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, queued: false } : m)));
+      // A fresh send means we are reachable again — drain anything else pending.
+      void flushOutbox(currentUserId);
+      return;
+    }
+
+    if (result.reason === 'VERIFICATION_FAILED') {
+      // Security refusal — never queue plaintext for a recipient whose bundle
+      // could not be authenticated (possible MITM / tampered directory entry).
+      // Drop the optimistic bubble and restore the draft so the user can retry.
+      setMessages((prev) => prev.filter((m) => m.id !== messageId));
+      setInputText(text);
+      setKeyError("Could not verify this contact's encryption keys. Message not sent.");
+      return;
+    }
+
+    // KEYS_NOT_READY / NO_KEYS / SEND_FAILED — persist the draft in the
+    // on-device outbox (plaintext never leaves this device) and let a later
+    // flush deliver it once the keys or connection are back.
+    await outboxStore.enqueue({
+      id: messageId,
+      senderId: currentUserId,
+      recipientId: userId,
+      text,
+      timestamp,
+      queuedAt: timestamp,
+    });
+    setKeyError(
+      result.reason === 'SEND_FAILED'
+        ? 'Message queued — will send when you are back online.'
+        : 'Message queued — will send once this contact sets up encryption.',
+    );
+    void flushOutbox(currentUserId);
   }, [inputText, currentUserId, userId]);
 
   const handleKeyPress = useCallback(
@@ -405,7 +452,9 @@ export function ChatScreen({ route, navigation }: Props) {
                 <Text style={styles.messageTime}>
                   {new Date(item.timestamp).toLocaleTimeString()}
                 </Text>
-                {item.isOwn && <StatusTicks delivered={item.delivered} read={item.read} />}
+                {item.isOwn && (
+                  <StatusTicks delivered={item.delivered} read={item.read} queued={item.queued} />
+                )}
               </View>
             </View>
           )}

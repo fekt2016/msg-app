@@ -3,6 +3,8 @@ import * as SecureStore from 'expo-secure-store';
 import type { ReactNode } from 'react';
 import { AuthProvider, useAuth } from './AuthContext';
 import * as authApi from '../api/auth';
+import { ensureE2eeKeysRegistered } from '../e2ee/ensureKeys';
+import { flushOutbox, outboxStore } from '../e2ee/outbox';
 
 let responseInterceptor: ((error: unknown) => unknown) | undefined;
 jest.mock('../api/client', () => ({
@@ -36,6 +38,21 @@ jest.mock('./deviceId', () => ({
   getDeviceId: jest.fn(async () => 'test-device-id'),
 }));
 
+jest.mock('../e2ee/ensureKeys', () => ({
+  ensureE2eeKeysRegistered: jest.fn(async () => undefined),
+  restoreE2eeKeys: jest.fn(async () => undefined),
+}));
+
+jest.mock('../e2ee/outbox', () => ({
+  flushOutbox: jest.fn(async () => ({ sentIds: [], failedIds: [] })),
+  outboxStore: {
+    list: jest.fn(async () => []),
+    enqueue: jest.fn(async () => undefined),
+    remove: jest.fn(async () => undefined),
+    clear: jest.fn(async () => undefined),
+  },
+}));
+
 const mockSecure = SecureStore as unknown as {
   getItemAsync: jest.Mock;
   setItemAsync: jest.Mock;
@@ -43,6 +60,9 @@ const mockSecure = SecureStore as unknown as {
 };
 
 const mockAuthApi = authApi as jest.Mocked<typeof authApi>;
+const mockEnsureKeys = ensureE2eeKeysRegistered as jest.Mock;
+const mockFlushOutbox = flushOutbox as jest.Mock;
+const mockOutboxStore = outboxStore as unknown as { clear: jest.Mock };
 
 function wrapper({ children }: { children: ReactNode }) {
   return <AuthProvider>{children}</AuthProvider>;
@@ -128,6 +148,21 @@ describe('AuthContext', () => {
     expect(result.current.isAuthenticated).toBe(true);
   });
 
+  it('publishes E2EE keys as part of completing registration (OTP verify)', async () => {
+    mockAuthApi.verifyOtp.mockResolvedValue(authResult);
+
+    const { result } = await renderHook(() => useAuth(), { wrapper });
+    await act(async () => {});
+    await act(async () => {
+      await result.current.verifyOtp({ identifier: 'a@b.com', purpose: 'VERIFY', code: '123456' });
+    });
+
+    // The account is messageable immediately — its public bundle is uploaded
+    // before sign-in resolves, and any queued drafts are flushed.
+    expect(mockEnsureKeys).toHaveBeenCalledWith('u1');
+    expect(mockFlushOutbox).toHaveBeenCalledWith('u1');
+  });
+
   it('registers without authenticating (OTP still pending)', async () => {
     mockAuthApi.register.mockResolvedValue('u1');
 
@@ -168,6 +203,8 @@ describe('AuthContext', () => {
     expect(mockAuthApi.logout).toHaveBeenCalledWith('rt');
     expect(mockSecure.deleteItemAsync).toHaveBeenCalled();
     expect(result.current.isAuthenticated).toBe(false);
+    // Queued plaintext drafts never survive the session for the next user.
+    expect(mockOutboxStore.clear).toHaveBeenCalled();
   });
 
   it('refreshes the access token and retries a request that failed with 401', async () => {

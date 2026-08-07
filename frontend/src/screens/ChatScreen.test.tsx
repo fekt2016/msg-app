@@ -6,6 +6,7 @@ import { RealtimeProvider } from '../realtime/RealtimeProvider';
 import * as e2eeApi from '../e2ee/e2eeApi';
 import * as crypto from '../e2ee/crypto';
 import * as keyStore from '../e2ee/keyStore';
+import * as outbox from '../e2ee/outbox';
 import * as client from '../realtime/client';
 import * as apiClientModule from '../api/client';
 
@@ -62,6 +63,21 @@ jest.mock('../e2ee/keyStore', () => ({
   },
 }));
 
+jest.mock('../e2ee/outbox', () => {
+  const actual = jest.requireActual('../e2ee/outbox');
+  return {
+    ...actual,
+    outboxStore: {
+      list: jest.fn(async () => []),
+      enqueue: jest.fn(async () => undefined),
+      remove: jest.fn(async () => undefined),
+      clear: jest.fn(async () => undefined),
+    },
+    flushOutbox: jest.fn(async () => ({ sentIds: [], failedIds: [] })),
+    subscribeToOutbox: jest.fn(() => jest.fn()),
+  };
+});
+
 jest.mock('../realtime/client', () => {
   const actual = jest.requireActual('../realtime/client');
   return {
@@ -87,6 +103,13 @@ const mockSecure = SecureStore as unknown as {
 const mockE2eeApi = e2eeApi as jest.Mocked<typeof e2eeApi>;
 const mockCrypto = crypto as jest.Mocked<typeof crypto>;
 const mockKeyStore = keyStore.keyStore as unknown as { getKeyBundle: jest.Mock };
+const mockOutboxStore = outbox.outboxStore as unknown as {
+  list: jest.Mock;
+  enqueue: jest.Mock;
+  remove: jest.Mock;
+  clear: jest.Mock;
+};
+const mockFlushOutbox = outbox.flushOutbox as jest.Mock;
 
 const mockRealtimeClient = client.realtimeClient as unknown as {
   connect: jest.Mock;
@@ -194,6 +217,8 @@ describe('ChatScreen delivery and read status', () => {
     mockE2eeApi.fetchKeyBundle.mockResolvedValue(theirBundle);
     mockCrypto.buildSharedSecret.mockResolvedValue(new Uint8Array(32));
     mockCrypto.verifyPreKeySignature.mockResolvedValue(true);
+    mockOutboxStore.list.mockResolvedValue([]);
+    mockFlushOutbox.mockResolvedValue({ sentIds: [], failedIds: [] });
     mockApiClient.get.mockResolvedValue({
       data: { data: [], meta: { page: 1, pageSize: 20, total: 0, totalPages: 0 } },
     });
@@ -461,6 +486,109 @@ describe('ChatScreen delivery and read status', () => {
     expect(mockCrypto.encryptMessage).not.toHaveBeenCalled();
     expect(mockE2eeApi.sendEncryptedMessage).not.toHaveBeenCalled();
     expect(socket.emit).not.toHaveBeenCalledWith('chat:message:new', expect.anything());
+  });
+
+  it('queues a message when the contact has not set up encryption yet', async () => {
+    mockE2eeApi.fetchKeyBundle.mockResolvedValue(null as never);
+    const { socket } = makeSocket();
+    await renderChat(socket);
+
+    await fireEvent.changeText(screen.getByPlaceholderText('Type a message…'), 'hello');
+    await fireEvent.press(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(mockOutboxStore.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          senderId: 'u1',
+          recipientId: 'u2',
+          text: 'hello',
+          timestamp: expect.any(Number),
+          queuedAt: expect.any(Number),
+        }),
+      );
+    });
+    expect(mockFlushOutbox).toHaveBeenCalledWith('u1');
+    expect(screen.getByText('Pending…')).toBeOnTheScreen();
+    expect(
+      screen.getByText(/Message queued — will send once this contact sets up encryption/),
+    ).toBeOnTheScreen();
+
+    // Nothing was encrypted or relayed — the draft waits for the recipient's keys.
+    expect(mockCrypto.encryptMessage).not.toHaveBeenCalled();
+    expect(mockE2eeApi.sendEncryptedMessage).not.toHaveBeenCalled();
+    expect(socket.emit).not.toHaveBeenCalledWith('chat:message:new', expect.anything());
+  });
+
+  it('queues a message when the send fails on the network', async () => {
+    mockCrypto.encryptMessage.mockResolvedValue({ ciphertext: 'ct-1', iv: 'iv-1' });
+    mockE2eeApi.sendEncryptedMessage.mockRejectedValue(new Error('network down'));
+    const { socket } = makeSocket();
+    await renderChat(socket);
+
+    await fireEvent.changeText(screen.getByPlaceholderText('Type a message…'), 'hello');
+    await fireEvent.press(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(mockOutboxStore.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ text: 'hello', recipientId: 'u2' }),
+      );
+    });
+    expect(screen.getByText('Pending…')).toBeOnTheScreen();
+    expect(
+      screen.getByText(/Message queued — will send when you are back online/),
+    ).toBeOnTheScreen();
+  });
+
+  it('shows a queued draft from the outbox and retries it on open', async () => {
+    mockOutboxStore.list.mockResolvedValue([
+      {
+        id: 'u1-1000',
+        senderId: 'u1',
+        recipientId: 'u2',
+        text: 'queued hello',
+        timestamp: 1000,
+        queuedAt: 1000,
+      },
+    ]);
+    const { socket } = makeSocket();
+    await renderChat(socket);
+
+    await waitFor(() => {
+      expect(screen.getByText(/queued hello/)).toBeOnTheScreen();
+    });
+    expect(screen.getByText('Pending…')).toBeOnTheScreen();
+    expect(mockFlushOutbox).toHaveBeenCalledWith('u1');
+  });
+
+  it('flips a pending draft to sent when a flush delivers it', async () => {
+    mockOutboxStore.list.mockResolvedValue([
+      {
+        id: 'u1-1000',
+        senderId: 'u1',
+        recipientId: 'u2',
+        text: 'queued hello',
+        timestamp: 1000,
+        queuedAt: 1000,
+      },
+    ]);
+    const { socket } = makeSocket();
+    await renderChat(socket);
+
+    await waitFor(() => {
+      expect(screen.getByText('Pending…')).toBeOnTheScreen();
+    });
+
+    // Drive the ChatScreen's subscription callback directly to simulate a flush
+    // that finally delivered the queued draft.
+    const subscribeMock = outbox.subscribeToOutbox as jest.Mock;
+    const listener = subscribeMock.mock.calls[0][0];
+    await act(async () => {
+      await listener({ sentIds: ['u1-1000'], failedIds: [] });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('Pending…')).toBeNull();
+    });
   });
 
   it('does not decrypt an incoming message when the sender bundle fails verification', async () => {

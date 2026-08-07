@@ -16,6 +16,9 @@ import { getDeviceId } from './deviceId';
 import { tokenStorage, type StoredUser } from './tokenStorage';
 import { refreshSession } from './refreshSession';
 import { ensureE2eeKeysRegistered } from '../e2ee/ensureKeys';
+import { flushOutbox, outboxStore } from '../e2ee/outbox';
+
+const OUTBOX_FLUSH_INTERVAL_MS = 30_000;
 
 interface AuthContextValue {
   isLoading: boolean;
@@ -66,6 +69,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setDeviceId(id);
         if (storedUser && storedRefresh) {
           setUser(storedUser);
+          // E2EE bootstrap for a restored session: publish this device's public
+          // bundle if it isn't up yet, and drain any messages queued while the
+          // app was closed. Fire-and-forget — a hiccup must not block launch.
+          void ensureE2eeKeysRegistered(storedUser.id).catch((err) => {
+            console.error('[e2ee] key bootstrap failed:', err);
+          });
+          void flushOutbox(storedUser.id).catch((err) => {
+            console.error('[outbox] flush failed:', err);
+          });
         }
       } finally {
         if (!cancelled) setIsLoading(false);
@@ -76,19 +88,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // Once a session is active (login, OTP verify, or restore), make sure this
-  // device has an E2EE identity and its public bundle is published — otherwise
-  // messages cannot be sent or received. Runs off the auth path so an upload
-  // hiccup never blocks sign-in.
+  // Once a session is active (login, OTP verify, or restore), periodically
+  // drain the on-device outbox so a message queued for a contact without keys
+  // (or for a dropped connection) goes out as soon as their keys or our network
+  // return, without the user having to reopen the chat. The immediate flush
+  // happens inside persistSession / the restore path above.
   useEffect(() => {
     if (!user?.id) return;
-    void ensureE2eeKeysRegistered(user.id).catch((err) => {
-      // Non-fatal: the next session activation retries. Send screens surface
-      // "keys not ready" if a message is attempted before this completes.
-      // Logged so a persistent failure (e.g. missing native crypto) is visible
-      // in the Metro logs instead of silently leaving the user unable to send.
-      console.error('[e2ee] key bootstrap failed:', err);
-    });
+    const timer = setInterval(() => {
+      void flushOutbox(user.id).catch((err) => {
+        console.error('[outbox] flush failed:', err);
+      });
+    }, OUTBOX_FLUSH_INTERVAL_MS);
+    return () => clearInterval(timer);
   }, [user?.id]);
 
   // Attach the access token to every request.
@@ -144,6 +156,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const persistSession = useCallback(async (result: authApi.AuthResult) => {
     await tokenStorage.set(result.accessToken, result.refreshToken, toStoredUser(result.user));
     setUser(toStoredUser(result.user));
+    // Keys at registration: complete the E2EE bootstrap as part of finishing
+    // sign-in so the account is messageable immediately (a public bundle must
+    // exist before anyone can encrypt to us). Best effort — a transient upload
+    // failure must not block auth; the interval and the outbox retry it.
+    await ensureE2eeKeysRegistered(result.user.id).catch((err) => {
+      console.error('[e2ee] key bootstrap failed:', err);
+    });
+    void flushOutbox(result.user.id).catch((err) => {
+      console.error('[outbox] flush failed:', err);
+    });
   }, []);
 
   const registerAndSendOtp = useCallback(
@@ -190,6 +212,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     } finally {
       await tokenStorage.clear();
+      // Queued drafts are plaintext held on this device for the current user —
+      // never leave them readable by whoever signs in next on the same device.
+      await outboxStore.clear();
       setUser(null);
     }
   }, []);
