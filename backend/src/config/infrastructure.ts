@@ -56,7 +56,7 @@ export function logInfrastructureMode(opts: {
 
   if (redisEnabled) {
     logger.info(
-      '✓ Redis enabled — Socket.IO Redis adapter + Redis presence store (cross-instance)',
+      '✓ Redis enabled — Socket.IO Redis adapter + Redis presence store + cross-instance rate limiting',
     );
   } else {
     logger.info('✓ Redis disabled by configuration');
