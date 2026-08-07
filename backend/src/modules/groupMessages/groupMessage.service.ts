@@ -1,15 +1,10 @@
 import { AppError } from '../../errors/AppError.js';
-import { groupMessageRepository, type StoredGroupMessage } from './groupMessage.repository.js';
+import {
+  groupMessageRepository,
+  type StoredGroupMessage,
+  type StoreGroupMessageInput,
+} from './groupMessage.repository.js';
 import { groupRepository } from '../groups/group.repository.js';
-
-export interface StoreGroupMessageInput {
-  groupId: string;
-  senderId: string;
-  keyId: number;
-  ciphertext: string;
-  iv: string;
-  timestamp: number;
-}
 
 export const groupMessageService = {
   /**
@@ -22,16 +17,7 @@ export const groupMessageService = {
     if (!member) {
       throw new AppError(403, 'NOT_GROUP_MEMBER', 'You are not a member of this group');
     }
-    const doc = await groupMessageRepository.create(input);
-    return {
-      id: doc._id.toString(),
-      groupId: doc.groupId.toString(),
-      senderId: doc.senderId.toString(),
-      keyId: doc.keyId,
-      ciphertext: doc.ciphertext,
-      iv: doc.iv,
-      timestamp: doc.timestamp,
-    };
+    return groupMessageRepository.create(input);
   },
 
   /**

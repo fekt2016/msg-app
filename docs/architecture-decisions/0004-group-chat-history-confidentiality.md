@@ -65,9 +65,11 @@ be honestly held:
 
 1. **Server-side access control — `joinedAt` scoping (REQUIRED, and the merge blocker for the
    branch).** `groupMessageService.listGroupMessages` MUST scope results to messages with
-   `timestamp >= caller's group_members.joinedAt`. A member who left and rejoined is scoped to
-   their most recent join. Owner: **backend/groups**. This closes the acute, in-app exploit
-   (`GET /messages` handing over full history).
+   `createdAt >= caller's group_members.joinedAt`, using the **server-assigned `createdAt`**, not
+   the client-supplied `timestamp` (which is forgeable — see security finding S2; a member could
+   otherwise craft a `timestamp` to pin/hide messages or slip content past the cutoff). A member
+   who left and rejoined is scoped to their most recent join. Owner: **backend/groups**. This
+   closes the acute, in-app exploit (`GET /messages` handing over full history).
 
 2. **Cryptographic control — sender-key rotation on join (REQUIRED for the model to be
    cryptographically real).** On a member-join, existing members MUST rotate their sender key to a
@@ -112,9 +114,12 @@ neither is decorative.
   an emergent one that flipped the moment persistence was added. Future work touching group history
   has a rule to follow, not a precedent to reverse-engineer.
 - **backend/groups** gains a `joinedAt` cutoff in `listGroupMessages`. `group_members.joinedAt`
-  already exists (`groupMember.model.ts`) — no schema or index change. Note the existing
-  `{ groupId: 1, timestamp: -1, _id: -1 }` index on `group_messages` still serves the scoped query
-  (the `timestamp >= joinedAt` bound is a prefix-compatible range on the same index).
+  already exists (`groupMember.model.ts`) — no schema change. As implemented, the cutoff and the
+  history sort both key on the server `createdAt`, so the `group_messages` index was changed to
+  `{ groupId: 1, createdAt: -1, _id: -1 }` to cover the scoped range+sort. This is a not-yet-deployed
+  collection introduced on the same branch, so no migration is required (the earlier draft of this
+  ADR said `timestamp` and "no index change"; the `createdAt` implementation is the correct one and
+  supersedes that note).
 - **e2ee + mobile** gain rotation-on-join, structurally identical to the shipped rotation-on-leave
   path — low novel-surface, since `rotateOwnSenderKey` already exists and is tested.
 - **Rejoin semantics are defined:** a member scoped to their _latest_ `joinedAt` cannot read

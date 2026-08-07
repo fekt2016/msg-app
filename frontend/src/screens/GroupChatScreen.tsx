@@ -122,7 +122,11 @@ export function GroupChatScreen({ route, navigation }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [history, currentUserId, nameByUser]);
+    // `nameByUser` is intentionally not a dependency: re-running the full
+    // decrypt on every roster change is redundant (it's idempotent + bounded to
+    // the first page), and the effect below already refreshes sender names once
+    // the roster loads. Merge only when the history itself changes.
+  }, [history, currentUserId]);
 
   // History merged before the member roster arrived keeps placeholder names;
   // refresh them once the roster loads.

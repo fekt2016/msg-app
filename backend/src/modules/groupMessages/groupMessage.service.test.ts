@@ -46,15 +46,8 @@ beforeEach(() => {
 describe('groupMessageService.storeMessage', () => {
   it('stores a message for a member of the group', async () => {
     groups.findMember.mockResolvedValue({ userId: 'user-a' } as never);
-    repo.create.mockResolvedValue({
-      _id: { toString: () => 'gm-1' },
-      groupId: { toString: () => 'group-1' },
-      senderId: { toString: () => 'user-a' },
-      keyId: 3,
-      ciphertext: 'ct',
-      iv: 'iv',
-      timestamp: 100,
-    } as never);
+    // The repository maps the doc → StoredGroupMessage; the service returns it as-is.
+    repo.create.mockResolvedValue(stored as never);
 
     await expect(groupMessageService.storeMessage(input)).resolves.toEqual(stored);
     expect(groups.findMember).toHaveBeenCalledWith('group-1', 'user-a');

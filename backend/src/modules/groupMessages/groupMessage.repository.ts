@@ -39,8 +39,9 @@ function toStoredGroupMessage(doc: GroupMessageDoc): StoredGroupMessage {
 }
 
 export const groupMessageRepository = {
-  async create(input: StoreGroupMessageInput): Promise<GroupMessageDoc> {
-    return GroupMessageModel.create(input);
+  async create(input: StoreGroupMessageInput): Promise<StoredGroupMessage> {
+    const doc = await GroupMessageModel.create(input);
+    return toStoredGroupMessage(doc);
   },
 
   /**
