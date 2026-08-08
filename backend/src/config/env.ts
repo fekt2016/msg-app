@@ -29,6 +29,8 @@ const envSchema = z.object({
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(20),
   OTP_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(3600000),
   OTP_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(3),
+  CHANNEL_POST_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(900000),
+  CHANNEL_POST_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(30),
   OTP_EXPIRES_IN_MINUTES: z.coerce.number().int().positive().default(10),
   OTP_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
   AFRICASTALKING_API_KEY: z.string().default(''),

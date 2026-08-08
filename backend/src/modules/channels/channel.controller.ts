@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { channelService } from './channel.service.js';
 import { channelPostService } from './channelPost.service.js';
+import { channelReactionService } from './channelReaction.service.js';
 import { AppError } from '../../errors/AppError.js';
 import { apiResponse, apiCreated } from '../../utils/apiResponse.js';
 import type {
@@ -11,6 +12,7 @@ import type {
   DecideJoinRequestBody,
   CreatePostBody,
   UpdatePostBody,
+  SetReactionBody,
 } from './channel.validation.js';
 
 export const channelController = {
@@ -227,5 +229,29 @@ export const channelController = {
       req.file,
     );
     res.status(200).json(apiResponse(result));
+  },
+
+  async setReaction(req: Request, res: Response) {
+    const identifier = String(req.params.identifier);
+    const postId = String(req.params.postId);
+    const body = req.body as SetReactionBody;
+    const reactionCounts = await channelReactionService.setReaction(
+      req.user!.id,
+      identifier,
+      postId,
+      body.emoji,
+    );
+    res.status(200).json(apiResponse({ reactionCounts }));
+  },
+
+  async removeReaction(req: Request, res: Response) {
+    const identifier = String(req.params.identifier);
+    const postId = String(req.params.postId);
+    const reactionCounts = await channelReactionService.removeReaction(
+      req.user!.id,
+      identifier,
+      postId,
+    );
+    res.status(200).json(apiResponse({ reactionCounts }));
   },
 };

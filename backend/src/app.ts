@@ -64,6 +64,16 @@ export function createApp(): Express {
     store: buildRateLimitStore(env.RATE_LIMIT_WINDOW_MS),
   });
 
+  // Tighter than the general tier: a broadcast channel is a spam vector, so
+  // post creation gets its own Redis-backed ceiling (channels-plan.md §5).
+  const postLimiter = rateLimit({
+    windowMs: env.CHANNEL_POST_RATE_LIMIT_WINDOW_MS,
+    max: env.CHANNEL_POST_RATE_LIMIT_MAX,
+    standardHeaders: true,
+    legacyHeaders: false,
+    store: buildRateLimitStore(env.CHANNEL_POST_RATE_LIMIT_WINDOW_MS),
+  });
+
   app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
   const apiV1 = express.Router();
@@ -79,6 +89,7 @@ export function createApp(): Express {
   apiV1.use('/channels', channelInviteRouter);
   apiV1.post('/channels/invites/:token/join', authLimiter);
   apiV1.post('/channels/:identifier/requests', joinLimiter);
+  apiV1.post('/channels/:identifier/posts', postLimiter);
   apiV1.use('/channels', channelRouter);
   apiV1.use('/groups', groupRouter);
   apiV1.use('/messages', messageRouter);

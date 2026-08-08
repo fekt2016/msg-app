@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { REACTION_EMOJIS } from './channelReaction.model.js';
 
 const CHANNEL_VISIBILITIES = ['PUBLIC', 'PRIVATE'] as const;
 const SUBSCRIBER_ROLES = ['ADMIN', 'SUBSCRIBER'] as const;
@@ -121,6 +122,12 @@ export const postParamSchema = z
   })
   .strict();
 
+export const setReactionSchema = z
+  .object({
+    emoji: z.enum(REACTION_EMOJIS, `Reaction must be one of: ${REACTION_EMOJIS.join(', ')}`),
+  })
+  .strict();
+
 export type CreateChannelBody = z.infer<typeof createChannelSchema>;
 export type UpdateChannelBody = z.infer<typeof updateChannelSchema>;
 export type UpdateSubscriberRoleBody = z.infer<typeof updateSubscriberRoleSchema>;
@@ -128,3 +135,4 @@ export type CreateInviteBody = z.infer<typeof createInviteSchema>;
 export type DecideJoinRequestBody = z.infer<typeof decideJoinRequestSchema>;
 export type CreatePostBody = z.infer<typeof createPostSchema>;
 export type UpdatePostBody = z.infer<typeof updatePostSchema>;
+export type SetReactionBody = z.infer<typeof setReactionSchema>;

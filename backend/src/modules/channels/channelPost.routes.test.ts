@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../../app.js';
 import * as channelRepositoryModule from './channel.repository.js';
 import * as channelPostRepositoryModule from './channelPost.repository.js';
+import * as channelReactionRepositoryModule from './channelReaction.repository.js';
 import * as userRepositoryModule from '../auth/user.repository.js';
 import * as mediaStorageModule from '../users/mediaStorage.js';
 
@@ -38,6 +39,16 @@ vi.mock('./channelPost.repository.js', () => ({
     updatePostBody: vi.fn(),
     softDeletePost: vi.fn(),
     appendPostImage: vi.fn(),
+    adjustReactionCounts: vi.fn(),
+  },
+}));
+
+vi.mock('./channelReaction.repository.js', () => ({
+  channelReactionRepository: {
+    findReaction: vi.fn(),
+    createReaction: vi.fn(),
+    setReactionEmoji: vi.fn(),
+    deleteReaction: vi.fn(),
   },
 }));
 
@@ -64,6 +75,7 @@ const repo = vi.mocked(channelRepositoryModule.channelRepository);
 const postRepo = vi.mocked(channelPostRepositoryModule.channelPostRepository);
 const userRepo = vi.mocked(userRepositoryModule.userRepository);
 const media = vi.mocked(mediaStorageModule.mediaStorage);
+const reactionRepo = vi.mocked(channelReactionRepositoryModule.channelReactionRepository);
 
 const app = createApp();
 const AUTH = { Authorization: 'Bearer valid-token' };
@@ -357,5 +369,108 @@ describe('POST /api/v1/channels/:identifier/posts/:postId/images', () => {
 
     expect(res.status).toBe(422);
     expect(res.body.error.code).toBe('MISSING_FILE');
+  });
+});
+
+describe('PUT /api/v1/channels/:identifier/posts/:postId/reaction', () => {
+  function mockReactionSetup(reactionCounts: Record<string, number> = { '👍': 1 }) {
+    mockSubscriber();
+    postRepo.findPostById.mockResolvedValue(
+      fakePost({ reactionCounts: new Map(Object.entries(reactionCounts)) }),
+    );
+  }
+
+  it('sets a reaction and returns updated counts', async () => {
+    mockReactionSetup();
+    reactionRepo.findReaction.mockResolvedValue(null);
+    postRepo.adjustReactionCounts.mockResolvedValue(
+      fakePost({ reactionCounts: new Map([['👍', 1]]) }),
+    );
+
+    const res = await request(app)
+      .put('/api/v1/channels/accra-news/posts/post-1/reaction')
+      .set(AUTH)
+      .send({ emoji: '👍' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.reactionCounts['👍']).toBe(1);
+    expect(reactionRepo.createReaction).toHaveBeenCalledWith('post-1', 'channel-1', 'user-1', '👍');
+  });
+
+  it('rejects a non-whitelisted emoji with 422', async () => {
+    mockSubscriber();
+
+    const res = await request(app)
+      .put('/api/v1/channels/accra-news/posts/post-1/reaction')
+      .set(AUTH)
+      .send({ emoji: '💀' });
+
+    expect(res.status).toBe(422);
+    expect(reactionRepo.createReaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects a missing emoji with 422', async () => {
+    mockSubscriber();
+
+    const res = await request(app)
+      .put('/api/v1/channels/accra-news/posts/post-1/reaction')
+      .set(AUTH)
+      .send({});
+
+    expect(res.status).toBe(422);
+  });
+
+  it('gates a private channel reaction from a non-subscriber with 403', async () => {
+    repo.findByIdOrSlug.mockResolvedValue(fakeChannel({ visibility: 'PRIVATE' }));
+    repo.findSubscriber.mockResolvedValue(null);
+
+    const res = await request(app)
+      .put('/api/v1/channels/accra-news/posts/post-1/reaction')
+      .set(AUTH)
+      .send({ emoji: '👍' });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('PRIVATE_CHANNEL');
+    expect(reactionRepo.createReaction).not.toHaveBeenCalled();
+  });
+
+  it('requires authentication', async () => {
+    const res = await request(app)
+      .put('/api/v1/channels/accra-news/posts/post-1/reaction')
+      .send({ emoji: '👍' });
+    expect(res.status).toBe(401);
+  });
+});
+
+describe('DELETE /api/v1/channels/:identifier/posts/:postId/reaction', () => {
+  it('removes a reaction and returns updated counts', async () => {
+    mockSubscriber();
+    postRepo.findPostById.mockResolvedValue(fakePost({ reactionCounts: new Map([['👍', 1]]) }));
+    reactionRepo.findReaction.mockResolvedValue({ emoji: '👍' });
+    postRepo.adjustReactionCounts.mockResolvedValue(
+      fakePost({ reactionCounts: new Map([['👍', 0]]) }),
+    );
+
+    const res = await request(app)
+      .delete('/api/v1/channels/accra-news/posts/post-1/reaction')
+      .set(AUTH);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.reactionCounts['👍']).toBe(0);
+    expect(reactionRepo.deleteReaction).toHaveBeenCalledWith('post-1', 'user-1');
+  });
+
+  it('is idempotent when the user has no reaction', async () => {
+    mockSubscriber();
+    postRepo.findPostById.mockResolvedValue(fakePost());
+    reactionRepo.findReaction.mockResolvedValue(null);
+
+    const res = await request(app)
+      .delete('/api/v1/channels/accra-news/posts/post-1/reaction')
+      .set(AUTH);
+
+    expect(res.status).toBe(200);
+    expect(reactionRepo.deleteReaction).not.toHaveBeenCalled();
   });
 });

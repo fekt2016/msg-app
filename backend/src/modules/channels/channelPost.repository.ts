@@ -80,4 +80,20 @@ export const channelPostRepository = {
       { new: true, runValidators: true },
     );
   },
+
+  /**
+   * Single-writer compensating update for the denormalized reactionCounts Map
+   * (net-new Map-`$inc` logic — see channels-plan.md CH3). `changes` applies
+   * as one atomic `$inc` so set/change/remove never reads-then-writes the map.
+   */
+  async adjustReactionCounts(
+    postId: string,
+    changes: { emoji: string; delta: 1 | -1 }[],
+  ): Promise<ChannelPostDoc | null> {
+    const inc: Record<string, 1 | -1> = {};
+    for (const { emoji, delta } of changes) {
+      inc[`reactionCounts.${emoji}`] = delta;
+    }
+    return ChannelPostModel.findByIdAndUpdate(postId, { $inc: inc }, { new: true });
+  },
 };

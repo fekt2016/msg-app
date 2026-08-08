@@ -16,6 +16,7 @@ import {
   updatePostSchema,
   listPostsQuerySchema,
   postParamSchema,
+  setReactionSchema,
 } from './channel.validation.js';
 import { authenticate } from '../../middleware/authenticate.js';
 import { validate } from '../../middleware/validate.js';
@@ -718,4 +719,59 @@ channelRouter.post(
   postImageUpload.single('image'),
   validate({ params: postParamSchema }),
   asyncHandler(channelController.addPostImage),
+);
+
+/**
+ * @swagger
+ * /channels/{identifier}/posts/{postId}/reaction:
+ *   put:
+ *     summary: Set or change the caller's reaction on a post (whitelisted emoji)
+ *     tags: [Channels]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - { name: identifier, in: path, required: true, schema: { type: string } }
+ *       - { name: postId, in: path, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [emoji]
+ *             properties:
+ *               emoji: { type: string, enum: ["👍", "❤️", "😂", "😮", "😢", "🙏"] }
+ *     responses:
+ *       200:
+ *         description: Updated reaction counts
+ *       404:
+ *         description: Post not found
+ */
+channelRouter.put(
+  '/:identifier/posts/:postId/reaction',
+  validate({ params: postParamSchema, body: setReactionSchema }),
+  asyncHandler(channelController.setReaction),
+);
+
+/**
+ * @swagger
+ * /channels/{identifier}/posts/{postId}/reaction:
+ *   delete:
+ *     summary: Remove the caller's reaction (idempotent)
+ *     tags: [Channels]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - { name: identifier, in: path, required: true, schema: { type: string } }
+ *       - { name: postId, in: path, required: true, schema: { type: string } }
+ *     responses:
+ *       200:
+ *         description: Updated reaction counts
+ *       404:
+ *         description: Post not found
+ */
+channelRouter.delete(
+  '/:identifier/posts/:postId/reaction',
+  validate({ params: postParamSchema }),
+  asyncHandler(channelController.removeReaction),
 );
