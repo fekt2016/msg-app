@@ -5,7 +5,7 @@ export interface PaginationMeta {
   totalPages: number;
 }
 
-export function apiResponse<T>(data: T, meta?: PaginationMeta) {
+export function apiResponse<T>(data: T, meta?: Record<string, unknown>) {
   return meta ? { success: true, data, meta } : { success: true, data };
 }
 

@@ -12,10 +12,15 @@ import {
   inviteParamSchema,
   decideJoinRequestSchema,
   listJoinRequestsQuerySchema,
+  createPostSchema,
+  updatePostSchema,
+  listPostsQuerySchema,
+  postParamSchema,
 } from './channel.validation.js';
 import { authenticate } from '../../middleware/authenticate.js';
 import { validate } from '../../middleware/validate.js';
 import { asyncHandler } from '../../utils/asyncHandler.js';
+import { postImageUpload } from './postImageUpload.js';
 
 export const channelRouter: Router = Router();
 
@@ -85,6 +90,32 @@ channelRouter.use(authenticate);
  *         decidedBy: { type: string, nullable: true }
  *         displayName: { type: string }
  *         avatarUrl: { type: string, nullable: true }
+ *     ChannelPost:
+ *       type: object
+ *       properties:
+ *         id: { type: string }
+ *         channelId: { type: string }
+ *         authorId: { type: string }
+ *         body: { type: string }
+ *         images:
+ *           type: array
+ *           items:
+ *             type: object
+ *             properties:
+ *               publicId: { type: string }
+ *               url: { type: string }
+ *               alt: { type: string }
+ *               order: { type: integer }
+ *         reactionCounts:
+ *           type: object
+ *           additionalProperties: { type: integer }
+ *         createdAt: { type: string, format: date-time }
+ *         updatedAt: { type: string, format: date-time }
+ *         author:
+ *           type: object
+ *           properties:
+ *             displayName: { type: string }
+ *             avatarUrl: { type: string, nullable: true }
  */
 
 /**
@@ -521,4 +552,170 @@ channelRouter.patch(
   '/:identifier/requests/:userId',
   validate({ params: subscriberParamSchema, body: decideJoinRequestSchema }),
   asyncHandler(channelController.decideJoinRequest),
+);
+
+/**
+ * @swagger
+ * /channels/{identifier}/posts:
+ *   post:
+ *     summary: Create a post (owner or admin)
+ *     tags: [Channels]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - { name: identifier, in: path, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [body]
+ *             properties:
+ *               body: { type: string, minLength: 1, maxLength: 2000 }
+ *     responses:
+ *       201:
+ *         description: Created post
+ *       403:
+ *         description: Not permitted (owner/admin only)
+ */
+channelRouter.post(
+  '/:identifier/posts',
+  validate({ params: channelIdentifierParamSchema, body: createPostSchema }),
+  asyncHandler(channelController.createPost),
+);
+
+// NOTE: cursor-paginated (documented deviation from the offset page/pageSize
+// meta shape — see postCursor.ts). meta.nextCursor is null when no more pages.
+/**
+ * @swagger
+ * /channels/{identifier}/posts:
+ *   get:
+ *     summary: Feed of posts, cursor-paginated (private channels gated to subscribers)
+ *     tags: [Channels]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - { name: identifier, in: path, required: true, schema: { type: string } }
+ *       - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
+ *       - { name: cursor, in: query, schema: { type: string } }
+ *     responses:
+ *       200:
+ *         description: Paginated posts with meta.nextCursor (null when no more pages)
+ */
+channelRouter.get(
+  '/:identifier/posts',
+  validate({ params: channelIdentifierParamSchema, query: listPostsQuerySchema }),
+  asyncHandler(channelController.listPosts),
+);
+
+/**
+ * @swagger
+ * /channels/{identifier}/posts/{postId}:
+ *   get:
+ *     summary: Get a single post
+ *     tags: [Channels]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - { name: identifier, in: path, required: true, schema: { type: string } }
+ *       - { name: postId, in: path, required: true, schema: { type: string } }
+ *     responses:
+ *       200:
+ *         description: Post
+ *       404:
+ *         description: Not found
+ */
+channelRouter.get(
+  '/:identifier/posts/:postId',
+  validate({ params: postParamSchema }),
+  asyncHandler(channelController.getPost),
+);
+
+/**
+ * @swagger
+ * /channels/{identifier}/posts/{postId}:
+ *   patch:
+ *     summary: Edit a post (author or channel admin)
+ *     tags: [Channels]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - { name: identifier, in: path, required: true, schema: { type: string } }
+ *       - { name: postId, in: path, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [body]
+ *             properties:
+ *               body: { type: string, minLength: 1, maxLength: 2000 }
+ *     responses:
+ *       200:
+ *         description: Updated post
+ *       403:
+ *         description: Not permitted
+ */
+channelRouter.patch(
+  '/:identifier/posts/:postId',
+  validate({ params: postParamSchema, body: updatePostSchema }),
+  asyncHandler(channelController.updatePost),
+);
+
+/**
+ * @swagger
+ * /channels/{identifier}/posts/{postId}:
+ *   delete:
+ *     summary: Soft-delete a post (author or channel admin)
+ *     tags: [Channels]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - { name: identifier, in: path, required: true, schema: { type: string } }
+ *       - { name: postId, in: path, required: true, schema: { type: string } }
+ *     responses:
+ *       200:
+ *         description: Deleted
+ *       403:
+ *         description: Not permitted
+ */
+channelRouter.delete(
+  '/:identifier/posts/:postId',
+  validate({ params: postParamSchema }),
+  asyncHandler(channelController.removePost),
+);
+
+/**
+ * @swagger
+ * /channels/{identifier}/posts/{postId}/images:
+ *   post:
+ *     summary: Upload an image to a post (author or channel admin)
+ *     tags: [Channels]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - { name: identifier, in: path, required: true, schema: { type: string } }
+ *       - { name: postId, in: path, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required: [image]
+ *             properties:
+ *               image: { type: string, format: binary }
+ *     responses:
+ *       200:
+ *         description: Post with the appended image
+ *       415:
+ *         description: Invalid file type or size
+ */
+channelRouter.post(
+  '/:identifier/posts/:postId/images',
+  postImageUpload.single('image'),
+  validate({ params: postParamSchema }),
+  asyncHandler(channelController.addPostImage),
 );

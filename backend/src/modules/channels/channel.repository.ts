@@ -109,6 +109,10 @@ export const channelRepository = {
     await ChannelModel.updateOne({ _id: id }, { $inc: { subscriberCount: delta } });
   },
 
+  async incrementPostCount(id: string, delta: 1 | -1): Promise<void> {
+    await ChannelModel.updateOne({ _id: id }, { $inc: { postCount: delta } });
+  },
+
   async findSubscriber(channelId: string, userId: string): Promise<ChannelSubscriberDoc | null> {
     return ChannelSubscriberModel.findOne({ channelId, userId });
   },

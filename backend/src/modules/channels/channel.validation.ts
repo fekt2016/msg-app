@@ -87,8 +87,44 @@ export const listJoinRequestsQuerySchema = z
   })
   .strict();
 
+export const createPostSchema = z
+  .object({
+    body: z.string().trim().min(1, 'Post body cannot be empty').max(2000, 'Post body is too long'),
+  })
+  .strict();
+
+export const updatePostSchema = z
+  .object({
+    body: z
+      .string()
+      .trim()
+      .min(1, 'Post body cannot be empty')
+      .max(2000, 'Post body is too long')
+      .optional(),
+  })
+  .strict()
+  .refine((data) => data.body !== undefined, {
+    message: 'At least one field to update is required',
+  });
+
+export const listPostsQuerySchema = z
+  .object({
+    limit: z.coerce.number().int().positive().max(100).default(20),
+    cursor: z.string().min(1).max(500).optional(),
+  })
+  .strict();
+
+export const postParamSchema = z
+  .object({
+    identifier: z.string().min(1).max(100),
+    postId: z.string().min(1),
+  })
+  .strict();
+
 export type CreateChannelBody = z.infer<typeof createChannelSchema>;
 export type UpdateChannelBody = z.infer<typeof updateChannelSchema>;
 export type UpdateSubscriberRoleBody = z.infer<typeof updateSubscriberRoleSchema>;
 export type CreateInviteBody = z.infer<typeof createInviteSchema>;
 export type DecideJoinRequestBody = z.infer<typeof decideJoinRequestSchema>;
+export type CreatePostBody = z.infer<typeof createPostSchema>;
+export type UpdatePostBody = z.infer<typeof updatePostSchema>;

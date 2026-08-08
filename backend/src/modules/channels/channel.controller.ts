@@ -1,5 +1,7 @@
 import type { Request, Response } from 'express';
 import { channelService } from './channel.service.js';
+import { channelPostService } from './channelPost.service.js';
+import { AppError } from '../../errors/AppError.js';
 import { apiResponse, apiCreated } from '../../utils/apiResponse.js';
 import type {
   CreateChannelBody,
@@ -7,6 +9,8 @@ import type {
   UpdateSubscriberRoleBody,
   CreateInviteBody,
   DecideJoinRequestBody,
+  CreatePostBody,
+  UpdatePostBody,
 } from './channel.validation.js';
 
 export const channelController = {
@@ -164,5 +168,64 @@ export const channelController = {
     const body = req.body as DecideJoinRequestBody;
     await channelService.decideJoinRequest(req.user!.id, identifier, targetUserId, body.action);
     res.status(200).json(apiResponse({ status: body.action }));
+  },
+
+  async createPost(req: Request, res: Response) {
+    const identifier = String(req.params.identifier);
+    const body = req.body as CreatePostBody;
+    const result = await channelPostService.createPost(req.user!.id, identifier, body.body);
+    res.status(201).json(apiCreated(result));
+  },
+
+  async listPosts(req: Request, res: Response) {
+    const identifier = String(req.params.identifier);
+    const { limit, cursor } = req.query as unknown as { limit: number; cursor?: string };
+    const result = await channelPostService.listPosts(identifier, req.user?.id, {
+      limit,
+      cursor: cursor ?? null,
+    });
+    res.status(200).json(apiResponse(result.items, { nextCursor: result.nextCursor }));
+  },
+
+  async getPost(req: Request, res: Response) {
+    const identifier = String(req.params.identifier);
+    const postId = String(req.params.postId);
+    const result = await channelPostService.getPost(identifier, req.user?.id, postId);
+    res.status(200).json(apiResponse(result));
+  },
+
+  async updatePost(req: Request, res: Response) {
+    const identifier = String(req.params.identifier);
+    const postId = String(req.params.postId);
+    const body = req.body as UpdatePostBody;
+    const result = await channelPostService.updatePost(
+      req.user!.id,
+      identifier,
+      postId,
+      body.body!,
+    );
+    res.status(200).json(apiResponse(result));
+  },
+
+  async removePost(req: Request, res: Response) {
+    const identifier = String(req.params.identifier);
+    const postId = String(req.params.postId);
+    await channelPostService.softDeletePost(req.user!.id, identifier, postId);
+    res.status(200).json(apiResponse({ deleted: true }));
+  },
+
+  async addPostImage(req: Request, res: Response) {
+    const identifier = String(req.params.identifier);
+    const postId = String(req.params.postId);
+    if (!req.file) {
+      throw new AppError(422, 'MISSING_FILE', 'An image file is required');
+    }
+    const result = await channelPostService.addPostImage(
+      req.user!.id,
+      identifier,
+      postId,
+      req.file,
+    );
+    res.status(200).json(apiResponse(result));
   },
 };
