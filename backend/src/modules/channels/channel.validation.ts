@@ -4,6 +4,11 @@ import { REACTION_EMOJIS } from './channelReaction.model.js';
 const CHANNEL_VISIBILITIES = ['PUBLIC', 'PRIVATE'] as const;
 const SUBSCRIBER_ROLES = ['ADMIN', 'SUBSCRIBER'] as const;
 
+// Path params that are always a Mongo `_id` are validated as an ObjectId at the
+// edge so a malformed value returns 422 (not a CastError → 500 from Mongoose).
+// `identifier` is intentionally excluded — it accepts an id OR a slug.
+const objectId = z.string().regex(/^[a-f\d]{24}$/i, 'Must be a valid id');
+
 export const createChannelSchema = z
   .object({
     name: z.string().trim().min(1, 'Name cannot be empty').max(100, 'Name is too long'),
@@ -57,7 +62,7 @@ export const channelIdentifierParamSchema = z
 export const subscriberParamSchema = z
   .object({
     identifier: z.string().min(1).max(100),
-    userId: z.string().min(1),
+    userId: objectId,
   })
   .strict();
 
@@ -78,7 +83,7 @@ export const inviteTokenParamSchema = z
 export const inviteParamSchema = z
   .object({
     identifier: z.string().min(1).max(100),
-    inviteId: z.string().min(1),
+    inviteId: objectId,
   })
   .strict();
 
@@ -126,7 +131,7 @@ export const listPostsQuerySchema = z
 export const postParamSchema = z
   .object({
     identifier: z.string().min(1).max(100),
-    postId: z.string().min(1),
+    postId: objectId,
   })
   .strict();
 

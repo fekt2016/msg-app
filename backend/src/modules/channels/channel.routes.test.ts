@@ -92,6 +92,30 @@ function fakeChannel(overrides: Record<string, unknown> = {}) {
 }
 
 const AUTH = { Authorization: 'Bearer valid-token' };
+// Valid 24-hex ObjectId for path params that are now ObjectId-validated (L2).
+const OID = 'a1b2c3d4e5f6a1b2c3d4e5f6';
+
+describe('ObjectId path-param validation (L2)', () => {
+  it('returns 422 (not 500) for a non-ObjectId postId', async () => {
+    const res = await request(app)
+      .get('/api/v1/channels/accra-news/posts/not-an-object-id')
+      .set(AUTH);
+
+    expect(res.status).toBe(422);
+    expect(res.body.error.code).toBe('VALIDATION_FAILED');
+    expect(repo.findByIdOrSlug).not.toHaveBeenCalled();
+  });
+
+  it('returns 422 for a non-ObjectId userId on a role change', async () => {
+    const res = await request(app)
+      .patch('/api/v1/channels/accra-news/subscribers/not-an-object-id')
+      .set(AUTH)
+      .send({ role: 'ADMIN' });
+
+    expect(res.status).toBe(422);
+    expect(res.body.error.code).toBe('VALIDATION_FAILED');
+  });
+});
 
 describe('POST /api/v1/channels', () => {
   it('creates a channel and returns 201', async () => {
@@ -363,7 +387,7 @@ describe('PATCH /api/v1/channels/:identifier/subscribers/:userId', () => {
     repo.updateSubscriberRole.mockResolvedValue({ role: 'ADMIN' });
 
     const res = await request(app)
-      .patch('/api/v1/channels/accra-news/subscribers/user-2')
+      .patch(`/api/v1/channels/accra-news/subscribers/${OID}`)
       .set(AUTH)
       .send({ role: 'ADMIN' });
 
@@ -373,7 +397,7 @@ describe('PATCH /api/v1/channels/:identifier/subscribers/:userId', () => {
 
   it('returns 422 for an invalid role', async () => {
     const res = await request(app)
-      .patch('/api/v1/channels/accra-news/subscribers/user-2')
+      .patch(`/api/v1/channels/accra-news/subscribers/${OID}`)
       .set(AUTH)
       .send({ role: 'OWNER' });
 
@@ -382,7 +406,7 @@ describe('PATCH /api/v1/channels/:identifier/subscribers/:userId', () => {
 
   it('returns 422 for an unknown role', async () => {
     const res = await request(app)
-      .patch('/api/v1/channels/accra-news/subscribers/user-2')
+      .patch(`/api/v1/channels/accra-news/subscribers/${OID}`)
       .set(AUTH)
       .send({ role: 'SUPERADMIN' });
 
@@ -461,7 +485,7 @@ describe('DELETE /api/v1/channels/:identifier/invites/:inviteId', () => {
     repo.findSubscriber.mockResolvedValue({ role: 'OWNER' });
     repo.revokeInvite.mockResolvedValue(fakeInvite());
 
-    const res = await request(app).delete('/api/v1/channels/accra-news/invites/invite-1').set(AUTH);
+    const res = await request(app).delete(`/api/v1/channels/accra-news/invites/${OID}`).set(AUTH);
 
     expect(res.status).toBe(200);
     expect(res.body.data.revoked).toBe(true);
@@ -472,7 +496,7 @@ describe('DELETE /api/v1/channels/:identifier/invites/:inviteId', () => {
     repo.findSubscriber.mockResolvedValue({ role: 'OWNER' });
     repo.revokeInvite.mockResolvedValue(null);
 
-    const res = await request(app).delete('/api/v1/channels/accra-news/invites/nope').set(AUTH);
+    const res = await request(app).delete(`/api/v1/channels/accra-news/invites/${OID}`).set(AUTH);
 
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe('INVITE_NOT_FOUND');
@@ -616,7 +640,7 @@ describe('PATCH /api/v1/channels/:identifier/requests/:userId', () => {
     repo.setJoinRequestStatus.mockResolvedValue({});
 
     const res = await request(app)
-      .patch('/api/v1/channels/accra-news/requests/user-2')
+      .patch(`/api/v1/channels/accra-news/requests/${OID}`)
       .set(AUTH)
       .send({ action: 'APPROVE' });
 
@@ -626,7 +650,7 @@ describe('PATCH /api/v1/channels/:identifier/requests/:userId', () => {
 
   it('returns 422 for an invalid action', async () => {
     const res = await request(app)
-      .patch('/api/v1/channels/accra-news/requests/user-2')
+      .patch(`/api/v1/channels/accra-news/requests/${OID}`)
       .set(AUTH)
       .send({ action: 'MAYBE' });
 

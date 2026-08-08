@@ -23,6 +23,11 @@ const envSchema = z.object({
   JWT_REFRESH_SECRET: z.string().min(32, 'JWT_REFRESH_SECRET must be at least 32 characters'),
   JWT_ACCESS_EXPIRES_IN: z.string().default('15m'),
   JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
+  // Express `trust proxy` setting so rate limiters key on the real client IP
+  // when behind a proxy (Nginx, Phase 7). Off by default: enabling it without a
+  // trusted proxy in front lets clients spoof X-Forwarded-For to evade limits.
+  // Values: 'false' | 'true' | a hop count ('1') | a preset/subnet ('loopback').
+  TRUST_PROXY: z.string().default('false'),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(900000),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
   AUTH_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(900000),

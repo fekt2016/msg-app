@@ -106,7 +106,7 @@ function fakeChannel(overrides: Record<string, unknown> = {}) {
 function fakePost(overrides: Record<string, unknown> = {}) {
   const now = new Date('2026-01-01T00:00:00.000Z');
   return {
-    _id: { toString: () => 'post-1' },
+    _id: { toString: () => 'a1b2c3d4e5f6a1b2c3d4e5f6' },
     channelId: { toString: () => 'channel-1' },
     authorId: { toString: () => 'user-1' },
     body: 'Hello world',
@@ -155,7 +155,7 @@ describe('POST /api/v1/channels/:identifier/posts', () => {
 
     expect(res.status).toBe(201);
     expect(res.body.success).toBe(true);
-    expect(res.body.data.id).toBe('post-1');
+    expect(res.body.data.id).toBe('a1b2c3d4e5f6a1b2c3d4e5f6');
     expect(res.body.data.author.displayName).toBe('Ama');
     expect(repo.incrementPostCount).toHaveBeenCalledWith('channel-1', 1);
   });
@@ -230,10 +230,12 @@ describe('GET /api/v1/channels/:identifier/posts/:postId', () => {
     postRepo.findPostById.mockResolvedValue(fakePost());
     mockEnrich();
 
-    const res = await request(app).get('/api/v1/channels/accra-news/posts/post-1').set(AUTH);
+    const res = await request(app)
+      .get('/api/v1/channels/accra-news/posts/a1b2c3d4e5f6a1b2c3d4e5f6')
+      .set(AUTH);
 
     expect(res.status).toBe(200);
-    expect(res.body.data.id).toBe('post-1');
+    expect(res.body.data.id).toBe('a1b2c3d4e5f6a1b2c3d4e5f6');
     expect(res.body.data.channelId).toBe('channel-1');
   });
 
@@ -241,7 +243,9 @@ describe('GET /api/v1/channels/:identifier/posts/:postId', () => {
     mockSubscriber();
     postRepo.findPostById.mockResolvedValue(null);
 
-    const res = await request(app).get('/api/v1/channels/accra-news/posts/post-1').set(AUTH);
+    const res = await request(app)
+      .get('/api/v1/channels/accra-news/posts/a1b2c3d4e5f6a1b2c3d4e5f6')
+      .set(AUTH);
 
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe('POST_NOT_FOUND');
@@ -256,7 +260,7 @@ describe('PATCH /api/v1/channels/:identifier/posts/:postId', () => {
     mockEnrich();
 
     const res = await request(app)
-      .patch('/api/v1/channels/accra-news/posts/post-1')
+      .patch('/api/v1/channels/accra-news/posts/a1b2c3d4e5f6a1b2c3d4e5f6')
       .set(AUTH)
       .send({ body: 'Edited' });
 
@@ -269,7 +273,7 @@ describe('PATCH /api/v1/channels/:identifier/posts/:postId', () => {
     postRepo.findPostById.mockResolvedValue(fakePost({ authorId: { toString: () => 'user-2' } }));
 
     const res = await request(app)
-      .patch('/api/v1/channels/accra-news/posts/post-1')
+      .patch('/api/v1/channels/accra-news/posts/a1b2c3d4e5f6a1b2c3d4e5f6')
       .set(AUTH)
       .send({ body: 'Edited' });
 
@@ -286,7 +290,9 @@ describe('DELETE /api/v1/channels/:identifier/posts/:postId', () => {
     postRepo.findPostById.mockResolvedValue(fakePost({ authorId: { toString: () => 'user-2' } }));
     postRepo.softDeletePost.mockResolvedValue(fakePost());
 
-    const res = await request(app).delete('/api/v1/channels/accra-news/posts/post-1').set(AUTH);
+    const res = await request(app)
+      .delete('/api/v1/channels/accra-news/posts/a1b2c3d4e5f6a1b2c3d4e5f6')
+      .set(AUTH);
 
     expect(res.status).toBe(200);
     expect(res.body.data.deleted).toBe(true);
@@ -297,7 +303,9 @@ describe('DELETE /api/v1/channels/:identifier/posts/:postId', () => {
     mockSubscriber();
     postRepo.findPostById.mockResolvedValue(fakePost({ authorId: { toString: () => 'user-2' } }));
 
-    const res = await request(app).delete('/api/v1/channels/accra-news/posts/post-1').set(AUTH);
+    const res = await request(app)
+      .delete('/api/v1/channels/accra-news/posts/a1b2c3d4e5f6a1b2c3d4e5f6')
+      .set(AUTH);
 
     expect(res.status).toBe(403);
   });
@@ -312,7 +320,7 @@ describe('POST /api/v1/channels/:identifier/posts/:postId/images', () => {
     mockEnrich();
 
     const res = await request(app)
-      .post('/api/v1/channels/accra-news/posts/post-1/images')
+      .post('/api/v1/channels/accra-news/posts/a1b2c3d4e5f6a1b2c3d4e5f6/images')
       .set(AUTH)
       .attach('image', VALID_PNG_BYTES, { filename: 'photo.png', contentType: 'image/png' });
 
@@ -320,7 +328,7 @@ describe('POST /api/v1/channels/:identifier/posts/:postId/images', () => {
     expect(media.uploadPostImage).toHaveBeenCalledWith(
       expect.objectContaining({ originalname: 'photo.png' }),
     );
-    expect(postRepo.appendPostImage).toHaveBeenCalledWith('post-1', {
+    expect(postRepo.appendPostImage).toHaveBeenCalledWith('a1b2c3d4e5f6a1b2c3d4e5f6', {
       publicId: 'img-1',
       url: 'https://cdn.test/i.png',
       alt: '',
@@ -332,7 +340,7 @@ describe('POST /api/v1/channels/:identifier/posts/:postId/images', () => {
     mockSubscriber();
 
     const res = await request(app)
-      .post('/api/v1/channels/accra-news/posts/post-1/images')
+      .post('/api/v1/channels/accra-news/posts/a1b2c3d4e5f6a1b2c3d4e5f6/images')
       .set(AUTH)
       .attach('image', Buffer.from('plain text'), {
         filename: 'notes.txt',
@@ -348,7 +356,7 @@ describe('POST /api/v1/channels/:identifier/posts/:postId/images', () => {
     mockSubscriber();
 
     const res = await request(app)
-      .post('/api/v1/channels/accra-news/posts/post-1/images')
+      .post('/api/v1/channels/accra-news/posts/a1b2c3d4e5f6a1b2c3d4e5f6/images')
       .set(AUTH)
       .attach('image', Buffer.from('definitely a png, trust me'), {
         filename: 'photo.png',
@@ -364,7 +372,7 @@ describe('POST /api/v1/channels/:identifier/posts/:postId/images', () => {
     mockSubscriber();
 
     const res = await request(app)
-      .post('/api/v1/channels/accra-news/posts/post-1/images')
+      .post('/api/v1/channels/accra-news/posts/a1b2c3d4e5f6a1b2c3d4e5f6/images')
       .set(AUTH);
 
     expect(res.status).toBe(422);
@@ -388,21 +396,26 @@ describe('PUT /api/v1/channels/:identifier/posts/:postId/reaction', () => {
     );
 
     const res = await request(app)
-      .put('/api/v1/channels/accra-news/posts/post-1/reaction')
+      .put('/api/v1/channels/accra-news/posts/a1b2c3d4e5f6a1b2c3d4e5f6/reaction')
       .set(AUTH)
       .send({ emoji: '👍' });
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.data.reactionCounts['👍']).toBe(1);
-    expect(reactionRepo.createReaction).toHaveBeenCalledWith('post-1', 'channel-1', 'user-1', '👍');
+    expect(reactionRepo.createReaction).toHaveBeenCalledWith(
+      'a1b2c3d4e5f6a1b2c3d4e5f6',
+      'channel-1',
+      'user-1',
+      '👍',
+    );
   });
 
   it('rejects a non-whitelisted emoji with 422', async () => {
     mockSubscriber();
 
     const res = await request(app)
-      .put('/api/v1/channels/accra-news/posts/post-1/reaction')
+      .put('/api/v1/channels/accra-news/posts/a1b2c3d4e5f6a1b2c3d4e5f6/reaction')
       .set(AUTH)
       .send({ emoji: '💀' });
 
@@ -414,7 +427,7 @@ describe('PUT /api/v1/channels/:identifier/posts/:postId/reaction', () => {
     mockSubscriber();
 
     const res = await request(app)
-      .put('/api/v1/channels/accra-news/posts/post-1/reaction')
+      .put('/api/v1/channels/accra-news/posts/a1b2c3d4e5f6a1b2c3d4e5f6/reaction')
       .set(AUTH)
       .send({});
 
@@ -426,7 +439,7 @@ describe('PUT /api/v1/channels/:identifier/posts/:postId/reaction', () => {
     repo.findSubscriber.mockResolvedValue(null);
 
     const res = await request(app)
-      .put('/api/v1/channels/accra-news/posts/post-1/reaction')
+      .put('/api/v1/channels/accra-news/posts/a1b2c3d4e5f6a1b2c3d4e5f6/reaction')
       .set(AUTH)
       .send({ emoji: '👍' });
 
@@ -437,7 +450,7 @@ describe('PUT /api/v1/channels/:identifier/posts/:postId/reaction', () => {
 
   it('requires authentication', async () => {
     const res = await request(app)
-      .put('/api/v1/channels/accra-news/posts/post-1/reaction')
+      .put('/api/v1/channels/accra-news/posts/a1b2c3d4e5f6a1b2c3d4e5f6/reaction')
       .send({ emoji: '👍' });
     expect(res.status).toBe(401);
   });
@@ -453,12 +466,12 @@ describe('DELETE /api/v1/channels/:identifier/posts/:postId/reaction', () => {
     );
 
     const res = await request(app)
-      .delete('/api/v1/channels/accra-news/posts/post-1/reaction')
+      .delete('/api/v1/channels/accra-news/posts/a1b2c3d4e5f6a1b2c3d4e5f6/reaction')
       .set(AUTH);
 
     expect(res.status).toBe(200);
     expect(res.body.data.reactionCounts['👍']).toBe(0);
-    expect(reactionRepo.deleteReaction).toHaveBeenCalledWith('post-1', 'user-1');
+    expect(reactionRepo.deleteReaction).toHaveBeenCalledWith('a1b2c3d4e5f6a1b2c3d4e5f6', 'user-1');
   });
 
   it('is idempotent when the user has no reaction', async () => {
@@ -467,7 +480,7 @@ describe('DELETE /api/v1/channels/:identifier/posts/:postId/reaction', () => {
     reactionRepo.findReaction.mockResolvedValue(null);
 
     const res = await request(app)
-      .delete('/api/v1/channels/accra-news/posts/post-1/reaction')
+      .delete('/api/v1/channels/accra-news/posts/a1b2c3d4e5f6a1b2c3d4e5f6/reaction')
       .set(AUTH);
 
     expect(res.status).toBe(200);
