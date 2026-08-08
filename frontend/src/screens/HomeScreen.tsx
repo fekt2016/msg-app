@@ -92,6 +92,22 @@ export function HomeScreen({ navigation }: Props) {
           </Text>
         </Pressable>
 
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Open channels"
+          onPress={() => navigation.navigate('Channels')}
+          style={styles.channelsCard}
+        >
+          <View style={styles.channelsIcon}>
+            <Text style={styles.channelsIconText}>◆</Text>
+          </View>
+          <View style={styles.channelsBody}>
+            <Text style={styles.channelsTitle}>Channels</Text>
+            <Text style={styles.channelsSub}>Follow community broadcasts and announcements</Text>
+          </View>
+          <Text style={styles.channelsArrow}>›</Text>
+        </Pressable>
+
         {contactsState.status === 'denied' && (
           <Text style={styles.contactsHint}>
             Contacts access was denied. Allow it in your device settings to find friends.
@@ -237,6 +253,49 @@ const styles = StyleSheet.create({
     color: colors.savannaMuted,
     fontSize: 13,
     marginTop: spacing.sm,
+  },
+  channelsCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    marginTop: spacing.md,
+    backgroundColor: colors.inputSurface,
+    borderWidth: 1,
+    borderColor: colors.kenteGold,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+  },
+  channelsIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.full,
+    backgroundColor: colors.baobabDeep,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  channelsIconText: {
+    color: colors.kenteGold,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  channelsBody: {
+    flex: 1,
+    gap: 2,
+  },
+  channelsTitle: {
+    color: colors.savanna,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  channelsSub: {
+    color: colors.savannaMuted,
+    fontSize: 13,
+  },
+  channelsArrow: {
+    color: colors.kenteGold,
+    fontSize: 22,
+    fontWeight: '700',
   },
   listContent: {
     gap: 0,
