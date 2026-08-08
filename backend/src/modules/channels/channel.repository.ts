@@ -186,8 +186,19 @@ export const channelRepository = {
     return { items, total, page, pageSize };
   },
 
-  async listSubscriptionsForUser(userId: string): Promise<ChannelSubscriberDoc[]> {
-    return ChannelSubscriberModel.find({ userId });
+  async listSubscriptionsForUser(
+    userId: string,
+    page: number,
+    pageSize: number,
+  ): Promise<{ items: ChannelSubscriberDoc[]; total: number }> {
+    const [items, total] = await Promise.all([
+      ChannelSubscriberModel.find({ userId })
+        .sort({ joinedAt: -1, _id: -1 })
+        .skip((page - 1) * pageSize)
+        .limit(pageSize),
+      ChannelSubscriberModel.countDocuments({ userId }),
+    ]);
+    return { items, total };
   },
 
   async createInvite(input: {

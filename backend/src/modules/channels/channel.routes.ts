@@ -5,6 +5,7 @@ import {
   updateChannelSchema,
   updateSubscriberRoleSchema,
   listChannelsQuerySchema,
+  paginationQuerySchema,
   channelIdentifierParamSchema,
   subscriberParamSchema,
   createInviteSchema,
@@ -154,11 +155,12 @@ channelRouter.post(
  * @swagger
  * /channels:
  *   get:
- *     summary: Browse public channels with the viewer's subscription status
+ *     summary: Browse public channels with the viewer's subscription status (optionally search via Typesense)
  *     tags: [Channels]
  *     security:
  *       - bearerAuth: []
  *     parameters:
+ *       - { name: q, in: query, schema: { type: string }, description: Search query }
  *       - { name: page, in: query, schema: { type: integer, default: 1 } }
  *       - { name: pageSize, in: query, schema: { type: integer, default: 20, maximum: 100 } }
  *     responses:
@@ -179,14 +181,21 @@ channelRouter.get(
  *     tags: [Channels]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - { name: page, in: query, schema: { type: integer, default: 1 } }
+ *       - { name: pageSize, in: query, schema: { type: integer, default: 20, maximum: 100 } }
  *     responses:
  *       200:
- *         description: Subscribed channels
+ *         description: Paginated subscribed channels
  *
  * NOTE: registered before /:identifier — a literal `mine` path must never be
  * swallowed by the identifier catch-all (Express matches in registration order).
  */
-channelRouter.get('/mine', asyncHandler(channelController.listMine));
+channelRouter.get(
+  '/mine',
+  validate({ query: paginationQuerySchema }),
+  asyncHandler(channelController.listMine),
+);
 
 /**
  * @swagger

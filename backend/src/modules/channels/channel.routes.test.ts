@@ -2,6 +2,7 @@ import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../../app.js';
 import * as channelRepositoryModule from './channel.repository.js';
+import * as searchModule from '../search/typesense.js';
 
 vi.mock('../../modules/auth/token.service.js', () => ({
   signAccessToken: vi.fn(() => 'access-token'),
@@ -17,6 +18,16 @@ vi.mock('../../modules/auth/token.service.js', () => ({
   }),
   verifyRefreshToken: vi.fn(),
   hashToken: vi.fn((t: string) => `hashed-${t}`),
+}));
+
+vi.mock('../search/typesense.js', () => ({
+  searchProvider: {
+    ping: vi.fn(),
+    createCollection: vi.fn(),
+    upsertDocuments: vi.fn(),
+    deleteDocument: vi.fn(),
+    search: vi.fn(),
+  },
 }));
 
 vi.mock('./channel.repository.js', () => ({
@@ -53,6 +64,7 @@ vi.mock('./channel.repository.js', () => ({
 }));
 
 const repo = vi.mocked(channelRepositoryModule.channelRepository);
+const searchProvider = vi.mocked(searchModule.searchProvider);
 
 const app = createApp();
 
@@ -136,19 +148,41 @@ describe('GET /api/v1/channels', () => {
 
     expect(res.status).toBe(422);
   });
+
+  it('searches public channels via Typesense when q is present', async () => {
+    searchProvider.search.mockResolvedValue({
+      hits: [{ document: { id: 'channel-1' } }],
+      found: 1,
+      page: 1,
+      perPage: 20,
+    });
+    repo.findByIds.mockResolvedValue([fakeChannel()]);
+    repo.findSubscriptions.mockResolvedValue([]);
+
+    const res = await request(app).get('/api/v1/channels?q=accra').set(AUTH);
+
+    expect(res.status).toBe(200);
+    expect(searchProvider.search).toHaveBeenCalledWith(
+      'channels',
+      expect.objectContaining({ q: 'accra', filterBy: 'visibility:PUBLIC' }),
+    );
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].name).toBe('Accra News');
+  });
 });
 
 describe('GET /api/v1/channels/mine', () => {
   it('returns the viewer subscribed channels (route not shadowed by :identifier)', async () => {
-    repo.listSubscriptionsForUser.mockResolvedValue([
-      { channelId: { toString: () => 'channel-1' }, role: 'OWNER' },
-    ]);
+    repo.listSubscriptionsForUser.mockResolvedValue({
+      items: [{ channelId: { toString: () => 'channel-1' }, role: 'OWNER' }],
+      total: 1,
+    });
     repo.findByIds.mockResolvedValue([fakeChannel()]);
 
     const res = await request(app).get('/api/v1/channels/mine').set(AUTH);
 
     expect(res.status).toBe(200);
-    expect(repo.listSubscriptionsForUser).toHaveBeenCalledWith('user-1');
+    expect(repo.listSubscriptionsForUser).toHaveBeenCalledWith('user-1', 1, 20);
     expect(res.body.data).toHaveLength(1);
     expect(res.body.data[0].role).toBe('OWNER');
   });

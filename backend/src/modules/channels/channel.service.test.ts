@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as channelRepositoryModule from './channel.repository.js';
+import * as searchModule from '../search/typesense.js';
 import { channelService } from './channel.service.js';
 
 vi.mock('../../realtime/channelEvents.js', () => ({
@@ -18,6 +19,16 @@ vi.mock('../../realtime/channelEvents.js', () => ({
     emitSubscriberLeft: vi.fn(),
     emitSubscriberRole: vi.fn(),
     emitDeleted: vi.fn(),
+  },
+}));
+
+vi.mock('../search/typesense.js', () => ({
+  searchProvider: {
+    ping: vi.fn(),
+    createCollection: vi.fn(),
+    upsertDocuments: vi.fn(),
+    deleteDocument: vi.fn(),
+    search: vi.fn(),
   },
 }));
 
@@ -55,6 +66,7 @@ vi.mock('./channel.repository.js', () => ({
 }));
 
 const repo = vi.mocked(channelRepositoryModule.channelRepository);
+const searchProvider = vi.mocked(searchModule.searchProvider);
 
 function fakeChannel(overrides: Record<string, unknown> = {}) {
   const now = new Date('2026-01-01T00:00:00.000Z');
@@ -95,6 +107,34 @@ describe('channelService.create', () => {
     expect(repo.incrementSubscriberCount).toHaveBeenCalledWith('channel-1', 1);
     expect(result.role).toBe('OWNER');
     expect(result.channel.slug).toBe('accra-news');
+  });
+
+  it('indexes a PUBLIC channel in the search index', async () => {
+    repo.create.mockResolvedValue(fakeChannel());
+    repo.findBySlug.mockResolvedValue(null);
+    repo.addSubscriber.mockResolvedValue({});
+    repo.incrementSubscriberCount.mockResolvedValue(undefined);
+
+    await channelService.create('user-1', { name: 'Accra News' });
+
+    expect(searchProvider.createCollection).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'channels' }),
+    );
+    expect(searchProvider.upsertDocuments).toHaveBeenCalledWith('channels', [
+      expect.objectContaining({ id: 'channel-1', name: 'Accra News', slug: 'accra-news' }),
+    ]);
+  });
+
+  it('does not index a PRIVATE channel', async () => {
+    repo.create.mockResolvedValue(fakeChannel({ visibility: 'PRIVATE' }));
+    repo.findBySlug.mockResolvedValue(null);
+    repo.addSubscriber.mockResolvedValue({});
+    repo.incrementSubscriberCount.mockResolvedValue(undefined);
+
+    await channelService.create('user-1', { name: 'Secret Board', visibility: 'PRIVATE' });
+
+    expect(searchProvider.createCollection).not.toHaveBeenCalled();
+    expect(searchProvider.upsertDocuments).not.toHaveBeenCalled();
   });
 
   it('generates a unique slug when the base slug is taken', async () => {
@@ -150,30 +190,110 @@ describe('channelService.list', () => {
     expect(result.items[0].isSubscribed).toBe(true);
     expect(result.items[0].role).toBe('SUBSCRIBER');
   });
+
+  it('routes to Typesense search when a query is present', async () => {
+    searchProvider.search.mockResolvedValue({
+      hits: [{ document: { id: 'channel-1' } }],
+      found: 1,
+      page: 1,
+      perPage: 20,
+    });
+    repo.findByIds.mockResolvedValue([fakeChannel()]);
+    repo.findSubscriptions.mockResolvedValue([]);
+
+    const result = await channelService.list(1, 20, 'user-2', 'accra');
+
+    expect(searchProvider.search).toHaveBeenCalledWith(
+      'channels',
+      expect.objectContaining({
+        q: 'accra',
+        queryBy: 'name,description,slug',
+        filterBy: 'visibility:PUBLIC',
+        page: 1,
+        perPage: 20,
+      }),
+    );
+    expect(repo.findByIds).toHaveBeenCalledWith(['channel-1']);
+    expect(result.items[0].name).toBe('Accra News');
+    expect(result.items[0].isSubscribed).toBe(false);
+    expect(result.total).toBe(1);
+  });
+
+  it('skips search for a blank query and uses the DB listing', async () => {
+    repo.findVisible.mockResolvedValue({
+      items: [fakeChannel()],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    });
+
+    const result = await channelService.list(1, 20, undefined, '   ');
+
+    expect(searchProvider.search).not.toHaveBeenCalled();
+    expect(repo.findVisible).toHaveBeenCalledWith(1, 20);
+    expect(result.items).toHaveLength(1);
+  });
+
+  it('falls back to the database listing when Typesense fails', async () => {
+    searchProvider.search.mockRejectedValue(new Error('search down'));
+    repo.findVisible.mockResolvedValue({
+      items: [fakeChannel()],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    });
+
+    const result = await channelService.list(1, 20, 'user-2', 'accra');
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].name).toBe('Accra News');
+  });
+
+  it('drops search hits whose documents were deleted from Mongo', async () => {
+    searchProvider.search.mockResolvedValue({
+      hits: [{ document: { id: 'channel-1' } }, { document: { id: 'channel-2' } }],
+      found: 2,
+      page: 1,
+      perPage: 20,
+    });
+    repo.findByIds.mockResolvedValue([fakeChannel()]);
+    repo.findSubscriptions.mockResolvedValue([]);
+
+    const result = await channelService.list(1, 20, undefined, 'accra');
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].id).toBe('channel-1');
+  });
 });
 
 describe('channelService.listMine', () => {
   it('returns the viewer subscribed channels with roles', async () => {
-    repo.listSubscriptionsForUser.mockResolvedValue([
-      { channelId: { toString: () => 'channel-1' }, role: 'ADMIN' },
-      { channelId: { toString: () => 'channel-2' }, role: 'SUBSCRIBER' },
-    ]);
+    repo.listSubscriptionsForUser.mockResolvedValue({
+      items: [
+        { channelId: { toString: () => 'channel-1' }, role: 'ADMIN' },
+        { channelId: { toString: () => 'channel-2' }, role: 'SUBSCRIBER' },
+      ],
+      total: 2,
+    });
     repo.findByIds.mockResolvedValue([fakeChannel()]);
 
-    const result = await channelService.listMine('user-1');
+    const result = await channelService.listMine('user-1', 1, 20);
 
-    expect(repo.listSubscriptionsForUser).toHaveBeenCalledWith('user-1');
+    expect(repo.listSubscriptionsForUser).toHaveBeenCalledWith('user-1', 1, 20);
     expect(repo.findByIds).toHaveBeenCalledWith(['channel-1', 'channel-2']);
     expect(result.items).toHaveLength(1);
     expect(result.items[0].isSubscribed).toBe(true);
     expect(result.items[0].role).toBe('ADMIN');
+    expect(result.total).toBe(2);
+    expect(result.page).toBe(1);
+    expect(result.pageSize).toBe(20);
   });
 
   it('returns an empty list when the viewer has no subscriptions', async () => {
-    repo.listSubscriptionsForUser.mockResolvedValue([]);
+    repo.listSubscriptionsForUser.mockResolvedValue({ items: [], total: 0 });
     repo.findByIds.mockResolvedValue([]);
 
-    const result = await channelService.listMine('user-1');
+    const result = await channelService.listMine('user-1', 1, 20);
 
     expect(result.items).toHaveLength(0);
     expect(result.total).toBe(0);
@@ -253,6 +373,40 @@ describe('channelService.update', () => {
     expect(result.name).toBe('New Name');
   });
 
+  it('re-indexes a PUBLIC channel on update', async () => {
+    repo.findByIdOrSlug.mockResolvedValue(fakeChannel());
+    repo.findSubscriber.mockResolvedValue({ role: 'OWNER' });
+    repo.update.mockResolvedValue(fakeChannel({ description: 'Updated' }));
+
+    await channelService.update('user-1', 'accra-news', { description: 'Updated' });
+
+    expect(searchProvider.upsertDocuments).toHaveBeenCalledWith('channels', [
+      expect.objectContaining({ id: 'channel-1', description: 'Updated' }),
+    ]);
+  });
+
+  it('removes a channel from the index when it flips to PRIVATE', async () => {
+    repo.findByIdOrSlug.mockResolvedValue(fakeChannel());
+    repo.findSubscriber.mockResolvedValue({ role: 'OWNER' });
+    repo.update.mockResolvedValue(fakeChannel({ visibility: 'PRIVATE' }));
+
+    await channelService.update('user-1', 'accra-news', { visibility: 'PRIVATE' });
+
+    expect(searchProvider.deleteDocument).toHaveBeenCalledWith('channels', 'channel-1');
+    expect(searchProvider.upsertDocuments).not.toHaveBeenCalled();
+  });
+
+  it('does not index a PRIVATE channel on update', async () => {
+    repo.findByIdOrSlug.mockResolvedValue(fakeChannel({ visibility: 'PRIVATE' }));
+    repo.findSubscriber.mockResolvedValue({ role: 'OWNER' });
+    repo.update.mockResolvedValue(fakeChannel({ visibility: 'PRIVATE', description: 'x' }));
+
+    await channelService.update('user-1', 'secret', { description: 'x' });
+
+    expect(searchProvider.upsertDocuments).not.toHaveBeenCalled();
+    expect(searchProvider.deleteDocument).not.toHaveBeenCalled();
+  });
+
   it('forbids non-subscribers from updating', async () => {
     repo.findByIdOrSlug.mockResolvedValue(fakeChannel());
     repo.findSubscriber.mockResolvedValue(null);
@@ -273,14 +427,16 @@ describe('channelService.update', () => {
 });
 
 describe('channelService.softDelete', () => {
-  it('soft-deletes as the owner', async () => {
+  it('soft-deletes as the owner and removes it from the search index', async () => {
     repo.findByIdOrSlug.mockResolvedValue(fakeChannel());
     repo.findSubscriber.mockResolvedValue({ role: 'OWNER' });
     repo.softDelete.mockResolvedValue(fakeChannel({ deletedAt: new Date() }));
+    repo.listSubscriberIds.mockResolvedValue(['user-2']);
 
     await channelService.softDelete('user-1', 'accra-news');
 
     expect(repo.softDelete).toHaveBeenCalledWith('channel-1');
+    expect(searchProvider.deleteDocument).toHaveBeenCalledWith('channels', 'channel-1');
   });
 
   it('forbids admins from deleting', async () => {

@@ -2,12 +2,15 @@ import { createHash, randomBytes } from 'node:crypto';
 import { AppError } from '../../errors/AppError.js';
 import { channelRepository } from './channel.repository.js';
 import { channelEventBus } from '../../realtime/channelEvents.js';
+import { searchProvider } from '../search/typesense.js';
+import { logger } from '../../config/logger.js';
 import type { ChannelRole } from './channelSubscriber.model.js';
 import type { InviteRole } from './channelInvite.model.js';
 import type { ChannelInviteDoc } from './channelInvite.model.js';
 import type { ChannelDoc, ChannelVisibility } from './channel.model.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const CHANNEL_INDEX = 'channels';
 
 function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex');
@@ -96,6 +99,10 @@ export const channelService = {
     await channelRepository.addSubscriber(channel._id.toString(), userId, 'OWNER');
     await channelRepository.incrementSubscriberCount(channel._id.toString(), 1);
 
+    if (channel.visibility === 'PUBLIC') {
+      await indexChannel(channel);
+    }
+
     return { channel: toSafeChannel(channel), role: 'OWNER' as const };
   },
 
@@ -103,29 +110,71 @@ export const channelService = {
     page: number,
     pageSize: number,
     viewerId?: string,
+    query?: string,
   ): Promise<{ items: ChannelWithSubscription[]; total: number; page: number; pageSize: number }> {
+    if (query && query.trim().length > 0) {
+      return this.search(query, page, pageSize, viewerId);
+    }
     const result = await channelRepository.findVisible(page, pageSize);
     return enrichWithSubscription(result.items, viewerId, result);
   },
 
+  async search(
+    query: string,
+    page: number,
+    pageSize: number,
+    viewerId?: string,
+  ): Promise<{ items: ChannelWithSubscription[]; total: number; page: number; pageSize: number }> {
+    try {
+      const result = await searchProvider.search(CHANNEL_INDEX, {
+        q: query,
+        queryBy: 'name,description,slug',
+        filterBy: 'visibility:PUBLIC',
+        sortBy: 'subscriberCount:desc',
+        page,
+        perPage: pageSize,
+      });
+      const ids = result.hits.map((hit) => hit.document.id);
+      const channels = await channelRepository.findByIds(ids);
+      const byId = new Map(channels.map((c) => [c._id.toString(), c]));
+      const items = ids.map((id) => byId.get(id)).filter((c): c is ChannelDoc => Boolean(c));
+      return enrichWithSubscription(items, viewerId, {
+        total: result.found,
+        page: result.page,
+        pageSize: result.perPage,
+      });
+    } catch (err) {
+      logger.warn({ err }, 'channel search failed; falling back to database listing');
+      const result = await channelRepository.findVisible(page, pageSize);
+      return enrichWithSubscription(result.items, viewerId, result);
+    }
+  },
+
   async listMine(
     userId: string,
+    page: number,
+    pageSize: number,
   ): Promise<{ items: ChannelWithSubscription[]; total: number; page: number; pageSize: number }> {
-    const subscriptions = await channelRepository.listSubscriptionsForUser(userId);
+    // Paginate at the subscription level (indexed {userId}) so a user subscribed
+    // to many channels never loads them all at once (CLAUDE.md §12). Ordering
+    // follows the subscription sort (most recently joined first); soft-deleted
+    // channels are dropped by findByIds without breaking that order.
+    const { items: subscriptions, total } = await channelRepository.listSubscriptionsForUser(
+      userId,
+      page,
+      pageSize,
+    );
     const channelIds = subscriptions.map((s) => s.channelId.toString());
     const channels = await channelRepository.findByIds(channelIds);
     const byId = new Map(channels.map((c) => [c._id.toString(), c]));
-    const roleById = new Map(
-      subscriptions
-        .filter((s) => byId.has(s.channelId.toString()))
-        .map((s) => [s.channelId.toString(), s.role]),
-    );
-    const items = [...byId.values()].map((channel) => ({
-      ...toSafeChannel(channel),
-      isSubscribed: true,
-      role: roleById.get(channel._id.toString()) ?? ('SUBSCRIBER' as const),
-    }));
-    return { items, total: items.length, page: 1, pageSize: items.length };
+    const items = subscriptions
+      .filter((s) => byId.has(s.channelId.toString()))
+      .map((s) => ({
+        ...toSafeChannel(byId.get(s.channelId.toString())!),
+        isSubscribed: true,
+        role: s.role,
+      }));
+    return { items, total, page, pageSize };
   },
 
   async getByIdOrSlug(identifier: string, viewerId?: string): Promise<ChannelWithSubscription> {
@@ -156,6 +205,11 @@ export const channelService = {
     if (!updated) {
       throw new AppError(404, 'CHANNEL_NOT_FOUND', 'Channel not found');
     }
+    if (updated.visibility === 'PUBLIC') {
+      await indexChannel(updated);
+    } else if (channel.visibility === 'PUBLIC') {
+      await searchProvider.deleteDocument(CHANNEL_INDEX, updated._id.toString());
+    }
     return toSafeChannel(updated);
   },
 
@@ -163,6 +217,9 @@ export const channelService = {
     const channel = await this.getForAdmin(identifier, userId, 'DELETE');
     const subscriberIds = await channelRepository.listSubscriberIds(channel.id);
     await channelRepository.softDelete(channel.id);
+    if (channel.visibility === 'PUBLIC') {
+      await searchProvider.deleteDocument(CHANNEL_INDEX, channel.id);
+    }
     channelEventBus.emitDeleted(channel.id, subscriberIds);
   },
 
@@ -509,6 +566,34 @@ async function enrichWithSubscription(
       isSubscribed: roleByChannelId.has(c._id.toString()),
       role: roleByChannelId.get(c._id.toString()) ?? null,
     })),
+  };
+}
+
+async function indexChannel(channel: ChannelDoc): Promise<void> {
+  await searchProvider.createCollection({
+    name: CHANNEL_INDEX,
+    defaultSortingField: 'createdAt',
+    fields: [
+      { name: 'name', type: 'string' },
+      { name: 'description', type: 'string' },
+      { name: 'slug', type: 'string' },
+      { name: 'visibility', type: 'string', facet: true },
+      { name: 'subscriberCount', type: 'int32', sort: true },
+      { name: 'createdAt', type: 'int64', sort: true },
+    ],
+  });
+  await searchProvider.upsertDocuments(CHANNEL_INDEX, [toSearchDoc(channel)]);
+}
+
+function toSearchDoc(channel: ChannelDoc) {
+  return {
+    id: channel._id.toString(),
+    name: channel.name,
+    description: channel.description ?? '',
+    slug: channel.slug,
+    visibility: channel.visibility,
+    subscriberCount: channel.subscriberCount,
+    createdAt: Math.floor(channel.createdAt.getTime() / 1000),
   };
 }
 

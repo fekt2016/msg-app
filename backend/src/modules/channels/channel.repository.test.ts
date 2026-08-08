@@ -243,11 +243,19 @@ describe('channelRepository.listSubscribers', () => {
 });
 
 describe('channelRepository.listSubscriptionsForUser', () => {
-  it('lists a user subscription rows', async () => {
-    subscriberModel.find.mockResolvedValue([subscriberDoc()]);
-    const result = await channelRepository.listSubscriptionsForUser('user-1');
+  it('lists a user subscription rows, paginated', async () => {
+    const sort = vi.fn(() => ({
+      skip: () => ({ limit: () => execChain([subscriberDoc()]) }),
+    }));
+    subscriberModel.find.mockReturnValue({ sort });
+    subscriberModel.countDocuments.mockResolvedValue(1);
+
+    const result = await channelRepository.listSubscriptionsForUser('user-1', 1, 20);
+
     expect(subscriberModel.find).toHaveBeenCalledWith({ userId: 'user-1' });
-    expect(result).toHaveLength(1);
+    expect(subscriberModel.countDocuments).toHaveBeenCalledWith({ userId: 'user-1' });
+    expect(result.items).toHaveLength(1);
+    expect(result.total).toBe(1);
   });
 });
 

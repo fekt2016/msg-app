@@ -23,9 +23,13 @@ export const channelController = {
   },
 
   async list(req: Request, res: Response) {
-    const { page, pageSize } = req.query as unknown as { page: number; pageSize: number };
+    const { q, page, pageSize } = req.query as unknown as {
+      q?: string;
+      page: number;
+      pageSize: number;
+    };
     const viewerId = req.user?.id;
-    const result = await channelService.list(page, pageSize, viewerId);
+    const result = await channelService.list(page, pageSize, viewerId, q);
     res.status(200).json(
       apiResponse(result.items, {
         page: result.page,
@@ -37,7 +41,8 @@ export const channelController = {
   },
 
   async listMine(req: Request, res: Response) {
-    const result = await channelService.listMine(req.user!.id);
+    const { page, pageSize } = req.query as unknown as { page: number; pageSize: number };
+    const result = await channelService.listMine(req.user!.id, page, pageSize);
     res.status(200).json(
       apiResponse(result.items, {
         page: result.page,

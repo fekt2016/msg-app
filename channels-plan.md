@@ -1,9 +1,11 @@
 # Phase 2 — Channels: Scope & Plan
 
-**Status:** Scoping (plan only — no build until greenlit).
+**Status:** Built (CH1–CH6 all backend + mobile + realtime done on `feature/phase-2-channels`); pending Security + Code review + merge.
 **Feature:** Channels (Phase 2, Community Features). Next unbuilt item after Communities.
 **Date:** 2026-08-06
 **Convention base:** `CLAUDE.md` §§5–12, the Communities module (closest existing analogue), and the group-chat realtime pattern.
+
+**Build complete (2026-08-08):** CH5 (search indexing) closed the last backend gap — `q` browse param + Typesense index of PUBLIC channels (create/update/delete hooks, DB fallback with viewer-membership enrichment on both paths) mirroring Communities; mobile search now works (previously the strict browse schema rejected `q`). CH6 mobile complete incl. the admin invite UI (`InvitesScreen`, `expo-clipboard` share link) which the earlier mobile pass had left out. Backend 548 tests / channels coverage 95.14% lines; frontend 261 tests, typecheck + lint clean both workspaces. **PENDING (DoD): security + code review for CH1/CH1b/CH2/CH3/CH4/CH5/CH6, then merge.**
 
 **Review pass (2026-08-07):** gaps closed against `main`'s current code — `GET /channels/mine` + viewer-aware browse items, cursor pagination scoped as **net-new infra** (encoder + `meta.nextCursor`), a non-avatar `MediaStorage.uploadPostImage`, feed author join, whole-room post broadcast (client dedupe), and reaction `$inc` split out as its own CH3 sub-task. **Build branches off `main`, not this branch** — `docs/phase-planning` trails `main` by ~3,200 lines (rate-limit store, live-member-list realtime, groupMessages module, offline outbox all landed after `18e91d0`).
 
@@ -193,6 +195,8 @@ Server-authoritative, mirroring the group-chat implementation (`group:subscribe`
 - **Upload safety:** magic-byte MIME sniff on post images (reuse `mediaStorage.sniffImageMimeType`), size-limited, streamed through backend.
 - **Anti-spam:** rate-limit post creation (Redis-backed tier) — a broadcast channel is a spam vector.
 - **Reaction integrity:** emoji whitelist (reject arbitrary strings); one reaction per user per post enforced by `unique {postId, userId}`.
+
+**Flagged for security review (pre-review pass, 2026-08-08):** invite-join has a `maxUses` **TOCTOU race** — `channelService.assertValidInvite` checks `usedCount >= maxUses`, then `channelRepository.incrementInviteUsed` (`channel.repository.ts`) does an unguarded `$inc`. Two concurrent joins on a `maxUses: 1` invite can both pass the check before either increments, over-consuming the invite. Suggested fix: make consumption atomic — `findOneAndUpdate({ _id, revokedAt: null, expiresAt: { $gt: now }, $expr: { $lt: ['$usedCount', '$maxUses'] } }, { $inc: { usedCount: 1 } })` and treat a `null` result as `410 GONE`. Left for the security agent (its atomicity/limit-enforcement domain), not fixed in this quality pass.
 
 ---
 

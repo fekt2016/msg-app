@@ -293,7 +293,9 @@ export async function createRealtimeServer(
         }
         await socket.join(`channel:${channelId}`);
         socket.emit(REALTIME_EVENTS.CHANNEL_SUBSCRIBED, { channelId });
-      })();
+      })().catch((err: unknown) => {
+        logger.warn({ err, userId, channelId }, 'Failed to handle channel:subscribe');
+      });
     });
 
     socket.on(REALTIME_EVENTS.CHANNEL_UNSUBSCRIBE, (raw: unknown) => {
