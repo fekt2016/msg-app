@@ -96,11 +96,14 @@ export const channelService = {
       ownerId: userId,
     });
 
+    // The creator gets an OWNER membership row — it's the authoritative source
+    // for post-authorization and the realtime room-join gate — but the owner is
+    // NOT counted as a subscriber, so subscriberCount reflects followers only
+    // (a brand-new channel reads "0 subscribers", not "1").
     await channelRepository.addSubscriber(channel._id.toString(), userId, 'OWNER');
-    await channelRepository.incrementSubscriberCount(channel._id.toString(), 1);
 
     if (channel.visibility === 'PUBLIC') {
-      await indexChannel(channel);
+      await reindexChannel(channel);
     }
 
     return { channel: toSafeChannel(channel), role: 'OWNER' as const };
@@ -206,9 +209,9 @@ export const channelService = {
       throw new AppError(404, 'CHANNEL_NOT_FOUND', 'Channel not found');
     }
     if (updated.visibility === 'PUBLIC') {
-      await indexChannel(updated);
+      await reindexChannel(updated);
     } else if (channel.visibility === 'PUBLIC') {
-      await searchProvider.deleteDocument(CHANNEL_INDEX, updated._id.toString());
+      await deindexChannel(updated._id.toString());
     }
     return toSafeChannel(updated);
   },
@@ -218,7 +221,7 @@ export const channelService = {
     const subscriberIds = await channelRepository.listSubscriberIds(channel.id);
     await channelRepository.softDelete(channel.id);
     if (channel.visibility === 'PUBLIC') {
-      await searchProvider.deleteDocument(CHANNEL_INDEX, channel.id);
+      await deindexChannel(channel.id);
     }
     channelEventBus.emitDeleted(channel.id, subscriberIds);
   },
@@ -277,7 +280,9 @@ export const channelService = {
     targetUserId: string,
     role: ChannelRole,
   ): Promise<void> {
-    const channel = await this.getForAdmin(identifier, actorId, 'UPDATE');
+    // Owner-only: role changes grant/revoke ADMIN, so the admin set stays
+    // owner-controlled (ADR 0005).
+    const channel = await this.getForAdmin(identifier, actorId, 'OWNER');
     if (role === 'OWNER') {
       throw new AppError(
         400,
@@ -317,7 +322,10 @@ export const channelService = {
     identifier: string,
     input: { role?: InviteRole; expiresInDays?: number; maxUses?: number },
   ) {
-    const channel = await this.getForAdmin(identifier, actorId, 'UPDATE');
+    // An ADMIN-granting invite is owner-only; a SUBSCRIBER invite stays
+    // owner-or-admin (ADR 0005).
+    const grantsAdmin = input.role === 'ADMIN';
+    const channel = await this.getForAdmin(identifier, actorId, grantsAdmin ? 'OWNER' : 'UPDATE');
     const expiresInDays = Math.min(Math.max(input.expiresInDays ?? 7, 1), 30);
     const token = randomBytes(32).toString('base64url');
     const invite = await channelRepository.createInvite({
@@ -339,8 +347,10 @@ export const channelService = {
 
   async revokeInvite(actorId: string, identifier: string, inviteId: string): Promise<void> {
     const channel = await this.getForAdmin(identifier, actorId, 'UPDATE');
-    const invite = await channelRepository.revokeInvite(inviteId);
-    if (!invite || invite.channelId.toString() !== channel.id) {
+    // Channel-scoped write: an invite belonging to another channel is never
+    // touched, it just yields null → 404 (B2 — no cross-channel revocation).
+    const invite = await channelRepository.revokeInvite(inviteId, channel.id);
+    if (!invite) {
       throw new AppError(404, 'INVITE_NOT_FOUND', 'Invite not found');
     }
   },
@@ -366,23 +376,38 @@ export const channelService = {
       throw new AppError(404, 'CHANNEL_NOT_FOUND', 'Channel not found');
     }
     const channelId = channel._id.toString();
+    const inviteId = invite._id.toString();
     const existing = await channelRepository.findSubscriber(channelId, userId);
     if (existing) {
-      let upgraded = false;
+      // Only a privilege-granting outcome (SUBSCRIBER → ADMIN) consumes a use;
+      // a no-op re-join grants nothing and must not burn the invite. The
+      // promotion goes through the same atomic consume so an ADMIN invite can't
+      // promote more users than maxUses allows (H1).
       if (invite.role === 'ADMIN' && existing.role === 'SUBSCRIBER') {
+        const consumed = await channelRepository.consumeInvite(inviteId);
+        if (!consumed) {
+          throw new AppError(410, 'INVITE_GONE', 'This invite has been used up');
+        }
         await channelRepository.updateSubscriberRole(channelId, userId, 'ADMIN');
-        upgraded = true;
+        channelEventBus.emitSubscriberRole(channelId, userId, 'ADMIN');
+        return { channel: toSafeChannel(channel), role: 'ADMIN', joined: false, upgraded: true };
       }
       return {
         channel: toSafeChannel(channel),
         role: existing.role,
         joined: false,
-        upgraded,
+        upgraded: false,
       };
+    }
+    // Atomic consume is the authoritative limit gate (B1): if it returns null the
+    // invite was exhausted/expired/revoked between preview and now → 410. Consume
+    // before adding the subscriber so a lost race never grants membership.
+    const consumed = await channelRepository.consumeInvite(inviteId);
+    if (!consumed) {
+      throw new AppError(410, 'INVITE_GONE', 'This invite has been used up');
     }
     await channelRepository.addSubscriber(channelId, userId, invite.role);
     await channelRepository.incrementSubscriberCount(channelId, 1);
-    await channelRepository.incrementInviteUsed(invite._id.toString());
     channelEventBus.emitSubscriberJoined(channelId, userId, invite.role);
     return {
       channel: toSafeChannel(channel),
@@ -522,22 +547,36 @@ export const channelService = {
     return { ...toSafeChannel(channel), isSubscribed: role !== null, role };
   },
 
+  /**
+   * Management gate. `'UPDATE'` = OWNER or ADMIN (channel edit, invite
+   * list/revoke, request list/decide, post moderation). `'DELETE'` and
+   * `'OWNER'` are owner-only tiers: `'OWNER'` gates every action that *grants
+   * ADMIN* — subscriber role changes and ADMIN-bearing invites — so the admin
+   * set stays owner-controlled and cannot self-propagate (ADR 0005).
+   */
   async getForAdmin(
     identifier: string,
     userId: string,
-    action: 'UPDATE' | 'DELETE',
+    action: 'UPDATE' | 'DELETE' | 'OWNER',
   ): Promise<SafeChannel> {
     const channel = await channelRepository.findByIdOrSlug(identifier);
     if (!channel || channel.deletedAt) {
       throw new AppError(404, 'CHANNEL_NOT_FOUND', 'Channel not found');
     }
     const subscriber = await channelRepository.findSubscriber(channel._id.toString(), userId);
-    const canManage = subscriber && (subscriber.role === 'OWNER' || subscriber.role === 'ADMIN');
+    const isOwner = subscriber?.role === 'OWNER';
+    const canManage = isOwner || subscriber?.role === 'ADMIN';
     if (!canManage) {
       throw new AppError(403, 'FORBIDDEN', 'You do not have permission to manage this channel');
     }
-    if (action === 'DELETE' && subscriber!.role !== 'OWNER') {
-      throw new AppError(403, 'FORBIDDEN', 'Only the owner can delete this channel');
+    if ((action === 'DELETE' || action === 'OWNER') && !isOwner) {
+      throw new AppError(
+        403,
+        'FORBIDDEN',
+        action === 'DELETE'
+          ? 'Only the owner can delete this channel'
+          : 'Only the owner can perform this action',
+      );
     }
     return toSafeChannel(channel);
   },
@@ -567,6 +606,29 @@ async function enrichWithSubscription(
       role: roleByChannelId.get(c._id.toString()) ?? null,
     })),
   };
+}
+
+// Best-effort search sync: indexing is a secondary side effect and must never
+// fail (or roll back) the primary channel write. Typesense being down/unreachable
+// logs a warning here instead of surfacing as a 500 to the user — mirroring the
+// read-path fallback in `channelService.search`.
+async function reindexChannel(channel: ChannelDoc): Promise<void> {
+  try {
+    await indexChannel(channel);
+  } catch (err) {
+    logger.warn(
+      { err, channelId: channel._id.toString() },
+      'channel search indexing failed (non-fatal)',
+    );
+  }
+}
+
+async function deindexChannel(channelId: string): Promise<void> {
+  try {
+    await searchProvider.deleteDocument(CHANNEL_INDEX, channelId);
+  } catch (err) {
+    logger.warn({ err, channelId }, 'channel search de-indexing failed (non-fatal)');
+  }
 }
 
 async function indexChannel(channel: ChannelDoc): Promise<void> {

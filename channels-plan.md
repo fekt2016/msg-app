@@ -148,7 +148,7 @@ REACTION_EMOJI     = 👍 | ❤️ | 😂 | 😮 | 😢 | 🙏   (whitelist — 
 
 **PRIVATE join — invites**
 
-- `POST /channels/:identifier/invites` — owner/ADMIN creates `{ role?, expiresInDays?, maxUses? }` → returns the raw token **once**
+- `POST /channels/:identifier/invites` — creates `{ role?, expiresInDays?, maxUses? }` → returns the raw token **once**. **Owner-or-ADMIN for a SUBSCRIBER invite; OWNER-only when `role: ADMIN`** (ADMIN-granting is owner-controlled — ADR 0005).
 - `GET /channels/:identifier/invites` — owner/ADMIN lists active invites (revocation management) _(private gated)_
 - `DELETE /channels/:identifier/invites/:inviteId` — revoke (soft: set `revokedAt`; a revoked token joins as `410`)
 - `GET /channels/invites/:token` — unauthenticated preview (channel name, role granted, expiry) — no join side effect
@@ -196,7 +196,12 @@ Server-authoritative, mirroring the group-chat implementation (`group:subscribe`
 - **Anti-spam:** rate-limit post creation (Redis-backed tier) — a broadcast channel is a spam vector.
 - **Reaction integrity:** emoji whitelist (reject arbitrary strings); one reaction per user per post enforced by `unique {postId, userId}`.
 
-**Flagged for security review (pre-review pass, 2026-08-08):** invite-join has a `maxUses` **TOCTOU race** — `channelService.assertValidInvite` checks `usedCount >= maxUses`, then `channelRepository.incrementInviteUsed` (`channel.repository.ts`) does an unguarded `$inc`. Two concurrent joins on a `maxUses: 1` invite can both pass the check before either increments, over-consuming the invite. Suggested fix: make consumption atomic — `findOneAndUpdate({ _id, revokedAt: null, expiresAt: { $gt: now }, $expr: { $lt: ['$usedCount', '$maxUses'] } }, { $inc: { usedCount: 1 } })` and treat a `null` result as `410 GONE`. Left for the security agent (its atomicity/limit-enforcement domain), not fixed in this quality pass.
+**Security audit (2026-08-08) — resolved:**
+
+- **B1 — invite `maxUses` TOCTOU race (BLOCKING, fixed):** `assertValidInvite`'s `usedCount >= maxUses` check was not atomic with the `$inc` consume, so concurrent joins on a `maxUses: 1` invite could all pass — for an `ADMIN` invite, minting multiple admins from a single-use link. Fixed: consumption now goes through `channelRepository.consumeInvite`, an atomic guarded `findOneAndUpdate({ _id, revokedAt: null, expiresAt: { $gt: now }, $expr: { $lt: ['$usedCount', '$maxUses'] } }, { $inc: { usedCount: 1 } })`; a `null` result → `410 GONE`. Consume runs before the subscriber is added.
+- **B2 — cross-channel invite revocation IDOR (BLOCKING, fixed):** `revokeInvite` did an unconditional `findByIdAndUpdate(inviteId)` with the channel-ownership match checked only after the write, letting a caller revoke another channel's invite. Fixed: `channelRepository.revokeInvite(id, channelId)` scopes the write with `findOneAndUpdate({ _id, channelId })`; a non-matching invite is never touched → `404`.
+- **H1 — ADMIN-invite upgrade escaped `maxUses` (HIGH, fixed):** the already-subscribed `SUBSCRIBER → ADMIN` upgrade path never consumed a use, so one single-use ADMIN invite could promote unlimited users. Fixed: the upgrade path now goes through the same atomic `consumeInvite` and emits `channel:subscriber:role`; a no-op re-join still consumes nothing.
+- **L1 — role-management authorization (architect decision, ADR 0005):** ADMIN-granting actions are OWNER-only; other management stays OWNER-or-ADMIN. Implementation of the two gate changes tracked separately — see ADR 0005.
 
 ---
 

@@ -410,7 +410,7 @@ channelRouter.patch(
  * @swagger
  * /channels/{identifier}/invites:
  *   post:
- *     summary: Create an invite link (owner or admin); the raw token is returned once
+ *     summary: Create an invite link; the raw token is returned once. SUBSCRIBER invites are owner-or-admin; ADMIN-granting invites are owner-only (ADR 0005)
  *     tags: [Channels]
  *     security:
  *       - bearerAuth: []

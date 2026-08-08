@@ -54,7 +54,7 @@ vi.mock('./channel.repository.js', () => ({
     findInviteByTokenHash: vi.fn(),
     listActiveInvites: vi.fn(),
     revokeInvite: vi.fn(),
-    incrementInviteUsed: vi.fn(),
+    consumeInvite: vi.fn(),
     createJoinRequest: vi.fn(),
     findLiveJoinRequest: vi.fn(),
     findJoinRequest: vi.fn(),
@@ -515,9 +515,9 @@ describe('POST /api/v1/channels/invites/:token/join', () => {
     repo.findInviteByTokenHash.mockResolvedValue(fakeInvite());
     repo.findById.mockResolvedValue(fakeChannel());
     repo.findSubscriber.mockResolvedValue(null);
+    repo.consumeInvite.mockResolvedValue(fakeInvite());
     repo.addSubscriber.mockResolvedValue({});
     repo.incrementSubscriberCount.mockResolvedValue(undefined);
-    repo.incrementInviteUsed.mockResolvedValue(undefined);
 
     const res = await request(app).post('/api/v1/channels/invites/raw-token/join').set(AUTH);
 

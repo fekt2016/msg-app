@@ -220,16 +220,32 @@ export const channelRepository = {
     return ChannelInviteModel.find({ channelId, revokedAt: null }).sort({ createdAt: -1 });
   },
 
-  async revokeInvite(id: string): Promise<ChannelInviteDoc | null> {
-    return ChannelInviteModel.findByIdAndUpdate(
-      id,
+  // Scoped to the channel so a caller authorized on channel X can never revoke
+  // an invite belonging to channel Y (object-level authorization — the match
+  // must gate the write, not be checked after it).
+  async revokeInvite(id: string, channelId: string): Promise<ChannelInviteDoc | null> {
+    return ChannelInviteModel.findOneAndUpdate(
+      { _id: id, channelId },
       { $set: { revokedAt: new Date() } },
       { new: true },
     );
   },
 
-  async incrementInviteUsed(id: string): Promise<void> {
-    await ChannelInviteModel.updateOne({ _id: id }, { $inc: { usedCount: 1 } });
+  // Atomically consume one use of an invite — the guard filter (not-revoked,
+  // not-expired, usedCount < maxUses) is the authoritative limit check, so
+  // concurrent joins can never over-consume a maxUses-bounded invite. Returns
+  // the updated doc on success, null when the invite is no longer consumable.
+  async consumeInvite(id: string): Promise<ChannelInviteDoc | null> {
+    return ChannelInviteModel.findOneAndUpdate(
+      {
+        _id: id,
+        revokedAt: null,
+        expiresAt: { $gt: new Date() },
+        $expr: { $lt: ['$usedCount', '$maxUses'] },
+      },
+      { $inc: { usedCount: 1 } },
+      { new: true },
+    );
   },
 
   async createJoinRequest(channelId: string, userId: string): Promise<ChannelJoinRequestDoc> {

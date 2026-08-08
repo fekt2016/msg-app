@@ -29,6 +29,7 @@ vi.mock('./channelInvite.model.js', () => ({
     find: vi.fn(),
     findOne: vi.fn(),
     findByIdAndUpdate: vi.fn(),
+    findOneAndUpdate: vi.fn(),
     updateOne: vi.fn(),
   },
 }));
@@ -319,23 +320,36 @@ describe('channelRepository invites', () => {
     expect(result).toHaveLength(1);
   });
 
-  it('revokes an invite by id', async () => {
-    inviteModel.findByIdAndUpdate.mockResolvedValue(inviteDoc({ revokedAt: new Date() }));
-    await channelRepository.revokeInvite('invite-1');
-    expect(inviteModel.findByIdAndUpdate).toHaveBeenCalledWith(
-      'invite-1',
+  it('revokes an invite scoped to its channel (B2 — no cross-channel revoke)', async () => {
+    inviteModel.findOneAndUpdate.mockResolvedValue(inviteDoc({ revokedAt: new Date() }));
+    await channelRepository.revokeInvite('invite-1', 'channel-1');
+    expect(inviteModel.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: 'invite-1', channelId: 'channel-1' },
       { $set: { revokedAt: expect.any(Date) } },
       { new: true },
     );
   });
 
-  it('increments the invite used count', async () => {
-    inviteModel.updateOne.mockResolvedValue(undefined);
-    await channelRepository.incrementInviteUsed('invite-1');
-    expect(inviteModel.updateOne).toHaveBeenCalledWith(
-      { _id: 'invite-1' },
+  it('atomically consumes an invite behind a maxUses guard (B1)', async () => {
+    inviteModel.findOneAndUpdate.mockResolvedValue(inviteDoc({ usedCount: 1 }));
+    const result = await channelRepository.consumeInvite('invite-1');
+    expect(inviteModel.findOneAndUpdate).toHaveBeenCalledWith(
+      {
+        _id: 'invite-1',
+        revokedAt: null,
+        expiresAt: { $gt: expect.any(Date) },
+        $expr: { $lt: ['$usedCount', '$maxUses'] },
+      },
       { $inc: { usedCount: 1 } },
+      { new: true },
     );
+    expect(result).not.toBeNull();
+  });
+
+  it('returns null when the invite can no longer be consumed (B1 race lost)', async () => {
+    inviteModel.findOneAndUpdate.mockResolvedValue(null);
+    const result = await channelRepository.consumeInvite('invite-1');
+    expect(result).toBeNull();
   });
 });
 

@@ -56,7 +56,7 @@ vi.mock('./channel.repository.js', () => ({
     findInviteByTokenHash: vi.fn(),
     listActiveInvites: vi.fn(),
     revokeInvite: vi.fn(),
-    incrementInviteUsed: vi.fn(),
+    consumeInvite: vi.fn(),
     createJoinRequest: vi.fn(),
     findLiveJoinRequest: vi.fn(),
     findJoinRequest: vi.fn(),
@@ -104,7 +104,9 @@ describe('channelService.create', () => {
       expect.objectContaining({ slug: 'accra-news', visibility: 'PUBLIC', ownerId: 'user-1' }),
     );
     expect(repo.addSubscriber).toHaveBeenCalledWith('channel-1', 'user-1', 'OWNER');
-    expect(repo.incrementSubscriberCount).toHaveBeenCalledWith('channel-1', 1);
+    // The creator's OWNER row exists for auth/room, but they are not counted as
+    // a subscriber, so the count is left at its default (0) on create.
+    expect(repo.incrementSubscriberCount).not.toHaveBeenCalled();
     expect(result.role).toBe('OWNER');
     expect(result.channel.slug).toBe('accra-news');
   });
@@ -123,6 +125,22 @@ describe('channelService.create', () => {
     expect(searchProvider.upsertDocuments).toHaveBeenCalledWith('channels', [
       expect.objectContaining({ id: 'channel-1', name: 'Accra News', slug: 'accra-news' }),
     ]);
+  });
+
+  it('still creates the channel when search indexing fails (Typesense down)', async () => {
+    repo.create.mockResolvedValue(fakeChannel());
+    repo.findBySlug.mockResolvedValue(null);
+    repo.addSubscriber.mockResolvedValue({});
+    repo.incrementSubscriberCount.mockResolvedValue(undefined);
+    searchProvider.createCollection.mockRejectedValueOnce(
+      new Error('Failed to prepare search collection'),
+    );
+
+    const result = await channelService.create('user-1', { name: 'Accra News' });
+
+    // Indexing is best-effort — the primary write must not fail on a search error.
+    expect(result.role).toBe('OWNER');
+    expect(result.channel.slug).toBe('accra-news');
   });
 
   it('does not index a PRIVATE channel', async () => {
@@ -541,6 +559,16 @@ describe('channelService.updateSubscriberRole', () => {
       channelService.updateSubscriberRole('user-1', 'accra-news', 'user-1', 'ADMIN'),
     ).rejects.toMatchObject({ code: 'CANNOT_MODIFY_OWNER' });
   });
+
+  it('forbids an ADMIN actor from changing roles — owner-only (ADR 0005)', async () => {
+    repo.findByIdOrSlug.mockResolvedValue(fakeChannel());
+    repo.findSubscriber.mockResolvedValue({ role: 'ADMIN' });
+
+    await expect(
+      channelService.updateSubscriberRole('admin-2', 'accra-news', 'user-2', 'ADMIN'),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN', statusCode: 403 });
+    expect(repo.updateSubscriberRole).not.toHaveBeenCalled();
+  });
 });
 
 describe('channelService.listSubscribers', () => {
@@ -619,6 +647,29 @@ describe('channelService.createInvite', () => {
       code: 'FORBIDDEN',
     });
   });
+
+  it('lets an ADMIN create a SUBSCRIBER invite (ADR 0005)', async () => {
+    repo.findByIdOrSlug.mockResolvedValue(fakeChannel());
+    repo.findSubscriber.mockResolvedValue({ role: 'ADMIN' });
+    repo.createInvite.mockResolvedValue(fakeInvite());
+
+    const result = await channelService.createInvite('admin-2', 'accra-news', {
+      role: 'SUBSCRIBER',
+    });
+
+    expect(result.token).toEqual(expect.any(String));
+    expect(repo.createInvite).toHaveBeenCalledWith(expect.objectContaining({ role: 'SUBSCRIBER' }));
+  });
+
+  it('forbids an ADMIN from creating an ADMIN-granting invite — owner-only (ADR 0005)', async () => {
+    repo.findByIdOrSlug.mockResolvedValue(fakeChannel());
+    repo.findSubscriber.mockResolvedValue({ role: 'ADMIN' });
+
+    await expect(
+      channelService.createInvite('admin-2', 'accra-news', { role: 'ADMIN' }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN', statusCode: 403 });
+    expect(repo.createInvite).not.toHaveBeenCalled();
+  });
 });
 
 describe('channelService.listInvites', () => {
@@ -643,7 +694,7 @@ describe('channelService.revokeInvite', () => {
 
     await channelService.revokeInvite('user-1', 'accra-news', 'invite-1');
 
-    expect(repo.revokeInvite).toHaveBeenCalledWith('invite-1');
+    expect(repo.revokeInvite).toHaveBeenCalledWith('invite-1', 'channel-1');
   });
 
   it('throws 404 when the invite does not exist', async () => {
@@ -718,16 +769,29 @@ describe('channelService.joinViaInvite', () => {
     repo.findInviteByTokenHash.mockResolvedValue(fakeInvite());
     repo.findById.mockResolvedValue(fakeChannel());
     repo.findSubscriber.mockResolvedValue(null);
+    repo.consumeInvite.mockResolvedValue(fakeInvite());
     repo.addSubscriber.mockResolvedValue({});
     repo.incrementSubscriberCount.mockResolvedValue(undefined);
-    repo.incrementInviteUsed.mockResolvedValue(undefined);
 
     const result = await channelService.joinViaInvite('user-2', 'raw-token');
 
+    expect(repo.consumeInvite).toHaveBeenCalledWith('invite-1');
     expect(repo.addSubscriber).toHaveBeenCalledWith('channel-1', 'user-2', 'SUBSCRIBER');
     expect(repo.incrementSubscriberCount).toHaveBeenCalledWith('channel-1', 1);
-    expect(repo.incrementInviteUsed).toHaveBeenCalledWith('invite-1');
     expect(result).toEqual(expect.objectContaining({ joined: true, upgraded: false }));
+  });
+
+  it('throws 410 when the invite is exhausted between preview and consume (B1 race)', async () => {
+    repo.findInviteByTokenHash.mockResolvedValue(fakeInvite());
+    repo.findById.mockResolvedValue(fakeChannel());
+    repo.findSubscriber.mockResolvedValue(null);
+    repo.consumeInvite.mockResolvedValue(null);
+
+    await expect(channelService.joinViaInvite('user-2', 'raw-token')).rejects.toMatchObject({
+      code: 'INVITE_GONE',
+      statusCode: 410,
+    });
+    expect(repo.addSubscriber).not.toHaveBeenCalled();
   });
 
   it('returns a no-op for an already-subscribed user', async () => {
@@ -738,22 +802,39 @@ describe('channelService.joinViaInvite', () => {
     const result = await channelService.joinViaInvite('user-2', 'raw-token');
 
     expect(repo.addSubscriber).not.toHaveBeenCalled();
-    expect(repo.incrementInviteUsed).not.toHaveBeenCalled();
+    expect(repo.consumeInvite).not.toHaveBeenCalled();
     expect(result).toEqual(
       expect.objectContaining({ joined: false, upgraded: false, role: 'SUBSCRIBER' }),
     );
   });
 
-  it('upgrades a subscriber to admin when the invite grants admin', async () => {
+  it('upgrades a subscriber to admin when the invite grants admin, consuming a use (H1)', async () => {
     repo.findInviteByTokenHash.mockResolvedValue(fakeInvite({ role: 'ADMIN' }));
     repo.findById.mockResolvedValue(fakeChannel());
     repo.findSubscriber.mockResolvedValue({ role: 'SUBSCRIBER' });
+    repo.consumeInvite.mockResolvedValue(fakeInvite({ role: 'ADMIN' }));
     repo.updateSubscriberRole.mockResolvedValue({ role: 'ADMIN' });
 
     const result = await channelService.joinViaInvite('user-2', 'raw-token');
 
+    // The promotion goes through the same atomic consume as a new join, so an
+    // ADMIN invite cannot promote more users than maxUses allows.
+    expect(repo.consumeInvite).toHaveBeenCalledWith('invite-1');
     expect(repo.updateSubscriberRole).toHaveBeenCalledWith('channel-1', 'user-2', 'ADMIN');
     expect(result.upgraded).toBe(true);
+  });
+
+  it('does not upgrade when the admin invite is exhausted (H1 race)', async () => {
+    repo.findInviteByTokenHash.mockResolvedValue(fakeInvite({ role: 'ADMIN' }));
+    repo.findById.mockResolvedValue(fakeChannel());
+    repo.findSubscriber.mockResolvedValue({ role: 'SUBSCRIBER' });
+    repo.consumeInvite.mockResolvedValue(null);
+
+    await expect(channelService.joinViaInvite('user-2', 'raw-token')).rejects.toMatchObject({
+      code: 'INVITE_GONE',
+      statusCode: 410,
+    });
+    expect(repo.updateSubscriberRole).not.toHaveBeenCalled();
   });
 
   it('never downgrades an existing admin', async () => {
