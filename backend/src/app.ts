@@ -19,8 +19,19 @@ import { recoveryBackupRouter } from './modules/e2ee/recoveryBackup.routes.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { buildRateLimitStore } from './middleware/rateLimitStore.js';
 
+export function resolveTrustProxy(value: string): boolean | number | string {
+  if (value === '' || value === 'false') return false;
+  if (value === 'true') return true;
+  const asNumber = Number(value);
+  return Number.isInteger(asNumber) && String(asNumber) === value ? asNumber : value;
+}
+
 export function createApp(): Express {
   const app = express();
+
+  // Off unless explicitly configured (see env.ts) — required for correct
+  // client-IP rate limiting behind a proxy, unsafe to enable without one.
+  app.set('trust proxy', resolveTrustProxy(env.TRUST_PROXY));
 
   app.use(helmet());
   app.use(
@@ -90,6 +101,8 @@ export function createApp(): Express {
   apiV1.post('/channels/invites/:token/join', authLimiter);
   apiV1.post('/channels/:identifier/requests', joinLimiter);
   apiV1.post('/channels/:identifier/posts', postLimiter);
+  // Image uploads are a Cloudinary cost/spam vector too — same tighter tier.
+  apiV1.post('/channels/:identifier/posts/:postId/images', postLimiter);
   apiV1.use('/channels', channelRouter);
   apiV1.use('/groups', groupRouter);
   apiV1.use('/messages', messageRouter);

@@ -1,8 +1,26 @@
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
-import { createApp } from './app.js';
+import { createApp, resolveTrustProxy } from './app.js';
 
 const app = createApp();
+
+describe('resolveTrustProxy', () => {
+  it('treats false/empty as no trust (safe default)', () => {
+    expect(resolveTrustProxy('false')).toBe(false);
+    expect(resolveTrustProxy('')).toBe(false);
+  });
+
+  it('parses true and integer hop counts', () => {
+    expect(resolveTrustProxy('true')).toBe(true);
+    expect(resolveTrustProxy('1')).toBe(1);
+    expect(resolveTrustProxy('2')).toBe(2);
+  });
+
+  it('passes presets/subnets through as strings', () => {
+    expect(resolveTrustProxy('loopback')).toBe('loopback');
+    expect(resolveTrustProxy('10.0.0.0/8')).toBe('10.0.0.0/8');
+  });
+});
 
 describe('app', () => {
   it('responds to the health check', async () => {
