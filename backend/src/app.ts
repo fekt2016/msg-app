@@ -9,6 +9,8 @@ import { healthRouter } from './routes/health.routes.js';
 import authRouter from './modules/auth/auth.routes.js';
 import userRouter from './modules/users/user.routes.js';
 import communityRouter from './modules/communities/community.routes.js';
+import { channelRouter } from './modules/channels/channel.routes.js';
+import { channelInviteRouter } from './modules/channels/channel.invite.routes.js';
 import groupRouter from './modules/groups/group.routes.js';
 import messageRouter from './modules/messages/message.routes.js';
 import { e2eeRouter } from './modules/e2ee/e2ee.routes.js';
@@ -54,6 +56,24 @@ export function createApp(): Express {
     store: buildRateLimitStore(env.OTP_RATE_LIMIT_WINDOW_MS),
   });
 
+  const joinLimiter = rateLimit({
+    windowMs: env.RATE_LIMIT_WINDOW_MS,
+    max: env.RATE_LIMIT_MAX,
+    standardHeaders: true,
+    legacyHeaders: false,
+    store: buildRateLimitStore(env.RATE_LIMIT_WINDOW_MS),
+  });
+
+  // Tighter than the general tier: a broadcast channel is a spam vector, so
+  // post creation gets its own Redis-backed ceiling (channels-plan.md §5).
+  const postLimiter = rateLimit({
+    windowMs: env.CHANNEL_POST_RATE_LIMIT_WINDOW_MS,
+    max: env.CHANNEL_POST_RATE_LIMIT_MAX,
+    standardHeaders: true,
+    legacyHeaders: false,
+    store: buildRateLimitStore(env.CHANNEL_POST_RATE_LIMIT_WINDOW_MS),
+  });
+
   app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
   const apiV1 = express.Router();
@@ -64,6 +84,13 @@ export function createApp(): Express {
   apiV1.use('/auth', authRouter);
   apiV1.use('/users', userRouter);
   apiV1.use('/communities', communityRouter);
+  // Unauthenticated invite preview first, then the rate-limited join/request
+  // endpoints, then the authenticated channel router (which owns /:identifier).
+  apiV1.use('/channels', channelInviteRouter);
+  apiV1.post('/channels/invites/:token/join', authLimiter);
+  apiV1.post('/channels/:identifier/requests', joinLimiter);
+  apiV1.post('/channels/:identifier/posts', postLimiter);
+  apiV1.use('/channels', channelRouter);
   apiV1.use('/groups', groupRouter);
   apiV1.use('/messages', messageRouter);
   apiV1.use('/e2ee/recovery', recoveryBackupRouter);

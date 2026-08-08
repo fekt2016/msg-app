@@ -3,6 +3,7 @@ import { io, type Socket } from 'socket.io-client';
 import { tokenStorage } from '../auth/tokenStorage';
 import { refreshSession } from '../auth/refreshSession';
 import type { MemberRole } from '../api/communities';
+import type { ChannelRole } from '../api/channels';
 
 export const REALTIME_EVENTS = {
   CONNECT: 'connect',
@@ -28,6 +29,17 @@ export const REALTIME_EVENTS = {
   GROUP_MEMBER_JOINED: 'group:member:joined',
   GROUP_MEMBER_LEFT: 'group:member:left',
   GROUP_DELETED: 'group:deleted',
+  CHANNEL_SUBSCRIBE: 'channel:subscribe',
+  CHANNEL_UNSUBSCRIBE: 'channel:unsubscribe',
+  CHANNEL_SUBSCRIBED: 'channel:subscribed',
+  CHANNEL_POST_NEW: 'channel:post:new',
+  CHANNEL_POST_UPDATED: 'channel:post:updated',
+  CHANNEL_POST_DELETED: 'channel:post:deleted',
+  CHANNEL_POST_REACTION: 'channel:post:reaction',
+  CHANNEL_SUBSCRIBER_JOINED: 'channel:subscriber:joined',
+  CHANNEL_SUBSCRIBER_LEFT: 'channel:subscriber:left',
+  CHANNEL_SUBSCRIBER_ROLE: 'channel:subscriber:role',
+  CHANNEL_DELETED: 'channel:deleted',
 } as const;
 
 export interface EncryptedMessageEvent {
@@ -92,6 +104,59 @@ export interface GroupAckEvent {
 export interface GroupMemberEvent {
   groupId: string;
   userId: string;
+  at: string;
+}
+
+/** A channel post created/updated, broadcast to the whole `channel:{id}` room. */
+export interface ChannelPostEvent {
+  channelId: string;
+  post: ChannelPostPayload;
+  at: string;
+}
+
+/** The post shape carried by `channel:post:*` events (author-enriched). */
+export interface ChannelPostPayload {
+  id: string;
+  channelId: string;
+  authorId: string;
+  body: string;
+  images: { publicId: string; url: string; alt: string; order: number }[];
+  reactionCounts: Record<string, number>;
+  createdAt: string;
+  updatedAt: string;
+  author: { displayName: string; avatarUrl: string | null };
+}
+
+/** A post soft-deleted, broadcast to the `channel:{id}` room. */
+export interface ChannelPostDeletedEvent {
+  channelId: string;
+  postId: string;
+  at: string;
+}
+
+/** Updated reaction counts for a post, broadcast to the `channel:{id}` room. */
+export interface ChannelPostReactionEvent {
+  channelId: string;
+  postId: string;
+  reactionCounts: Record<string, number>;
+  at: string;
+}
+
+/**
+ * A channel subscriber joined/left/role change. Delivered to the `channel:{id}`
+ * room and the affected user's own `user:{id}` room (mirrors the community
+ * member-list pattern). `role` is present on join/role events and absent on leave.
+ */
+export interface ChannelSubscriberEvent {
+  channelId: string;
+  userId: string;
+  role?: ChannelRole;
+  at: string;
+}
+
+/** A channel was soft-deleted — every subscriber is evicted and notified. */
+export interface ChannelDeletedEvent {
+  channelId: string;
   at: string;
 }
 

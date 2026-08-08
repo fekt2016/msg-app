@@ -43,3 +43,17 @@ jest.mock('expo-contacts', () => ({
   },
   ContactsSortOrder: { GivenName: 'givenName' },
 }));
+
+// @expo/vector-icons loads icon fonts via expo-font/expo-asset, which isn't
+// wired into the Jest asset registry. Stub the icon components (interactive
+// elements carry their own accessibility labels on the Pressable, so the icon
+// glyph itself is not needed in tests) to avoid hitting the font loader.
+jest.mock('@expo/vector-icons', () => {
+  const stub = () => null;
+  return {
+    __esModule: true,
+    Ionicons: stub,
+    MaterialCommunityIcons: stub,
+    Feather: stub,
+  };
+});

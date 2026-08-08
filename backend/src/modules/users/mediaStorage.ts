@@ -9,8 +9,16 @@ export interface UploadableFile {
   originalname: string;
 }
 
+export interface PostImageAsset {
+  publicId: string;
+  url: string;
+  width: number;
+  height: number;
+}
+
 export interface MediaStorage {
   uploadAvatar(file: UploadableFile): Promise<AvatarAsset>;
+  uploadPostImage(file: UploadableFile): Promise<PostImageAsset>;
   deleteByPublicId(publicId: string): Promise<void>;
 }
 
@@ -131,6 +139,69 @@ class CloudinaryMediaStorage implements MediaStorage {
     return asset;
   }
 
+  /**
+   * Uploads channel-post images to Cloudinary. Unlike `uploadAvatar` there is
+   * no square crop — only a width cap so delivery stays light; aspect ratio is
+   * preserved. Folder `eaz-community/channel-posts`.
+   */
+  async uploadPostImage(file: UploadableFile): Promise<PostImageAsset> {
+    if (!env.CLOUDINARY_CLOUD_NAME || !env.CLOUDINARY_API_KEY || !env.CLOUDINARY_API_SECRET) {
+      throw new AppError(
+        500,
+        'STORAGE_PROVIDER_NOT_CONFIGURED',
+        'Cloudinary is not configured. Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET.',
+      );
+    }
+
+    const { v2: cloudinary } = await import('cloudinary');
+    cloudinary.config({
+      cloud_name: env.CLOUDINARY_CLOUD_NAME,
+      api_key: env.CLOUDINARY_API_KEY,
+      api_secret: env.CLOUDINARY_API_SECRET,
+    });
+
+    const asset = await new Promise<PostImageAsset>((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        {
+          folder: 'eaz-community/channel-posts',
+          overwrite: false,
+          transformation: [{ width: 1600, crop: 'limit', quality: 'auto', fetch_format: 'auto' }],
+        },
+        (error, result) => {
+          if (error) {
+            reject(
+              new AppError(502, 'UPLOAD_FAILED', 'Image upload failed', {
+                details: [error.message],
+              }),
+            );
+            return;
+          }
+          if (!result || !result.public_id) {
+            reject(new AppError(502, 'UPLOAD_FAILED', 'Image upload returned no result'));
+            return;
+          }
+          resolve({
+            publicId: result.public_id,
+            url: result.secure_url,
+            width: result.width ?? 1600,
+            height: result.height ?? 900,
+          });
+        },
+      );
+      stream.on('error', (error: Error) => {
+        reject(
+          new AppError(502, 'UPLOAD_FAILED', 'Image upload stream failed', {
+            details: [error.message],
+          }),
+        );
+      });
+      stream.end(file.buffer);
+    });
+
+    logger.info({ publicId: asset.publicId }, 'Post image uploaded to Cloudinary');
+    return asset;
+  }
+
   async deleteByPublicId(publicId: string): Promise<void> {
     const { v2: cloudinary } = await import('cloudinary');
     await cloudinary.uploader.destroy(publicId);
@@ -147,6 +218,19 @@ class LoggingMediaStorage implements MediaStorage {
     logger.info(
       { name: file.originalname, size: file.buffer.length, type: file.mimetype },
       '[STORAGE] Avatar upload skipped — Cloudinary not configured',
+    );
+    return {
+      publicId: `dev-${Date.now()}`,
+      url: '',
+      width: 0,
+      height: 0,
+    };
+  }
+
+  async uploadPostImage(file: UploadableFile): Promise<PostImageAsset> {
+    logger.info(
+      { name: file.originalname, size: file.buffer.length, type: file.mimetype },
+      '[STORAGE] Post image upload skipped — Cloudinary not configured',
     );
     return {
       publicId: `dev-${Date.now()}`,

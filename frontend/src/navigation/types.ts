@@ -24,6 +24,13 @@ export type AppStackParamList = {
   CreateGroup: undefined;
   RecoveryKeySetup: undefined;
   RestoreRecovery: undefined;
+  Channels: undefined;
+  ChannelDetail: { identifier: string };
+  CreateChannel: { identifier?: string } | undefined;
+  ChannelPostComposer: { identifier: string };
+  JoinRequests: { identifier: string };
+  Invites: { identifier: string };
+  InviteJoin: { token?: string } | undefined;
 };
 
 export type RootStackParamList = {
