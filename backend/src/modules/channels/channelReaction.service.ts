@@ -2,6 +2,7 @@ import { AppError } from '../../errors/AppError.js';
 import { channelService } from './channel.service.js';
 import { channelPostRepository } from './channelPost.repository.js';
 import { channelReactionRepository } from './channelReaction.repository.js';
+import { channelEventBus } from '../../realtime/channelEvents.js';
 import { REACTION_EMOJIS, type ReactionEmoji } from './channelReaction.model.js';
 
 export type ReactionCounts = Record<string, number>;
@@ -47,7 +48,9 @@ export const channelReactionService = {
     changes.push({ emoji, delta: 1 });
 
     const updated = await channelPostRepository.adjustReactionCounts(postId, changes);
-    return toReactionCounts(updated ?? post);
+    const counts = toReactionCounts(updated ?? post);
+    channelEventBus.emitPostReaction(channel.id, postId, counts);
+    return counts;
   },
 
   /**
@@ -71,7 +74,9 @@ export const channelReactionService = {
     const updated = await channelPostRepository.adjustReactionCounts(postId, [
       { emoji: existing.emoji, delta: -1 },
     ]);
-    return toReactionCounts(updated ?? post);
+    const counts = toReactionCounts(updated ?? post);
+    channelEventBus.emitPostReaction(channel.id, postId, counts);
+    return counts;
   },
 
   isSupportedReaction(value: unknown): value is ReactionEmoji {

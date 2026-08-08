@@ -23,6 +23,12 @@ vi.mock('./channelReaction.repository.js', () => ({
   },
 }));
 
+vi.mock('../../realtime/channelEvents.js', () => ({
+  channelEventBus: {
+    emitPostReaction: vi.fn(),
+  },
+}));
+
 import * as channelRepositoryModule from './channel.repository.js';
 import * as channelPostRepositoryModule from './channelPost.repository.js';
 import * as channelReactionRepositoryModule from './channelReaction.repository.js';

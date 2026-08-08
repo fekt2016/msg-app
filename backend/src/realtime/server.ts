@@ -6,8 +6,10 @@ import { buildRealtimeAdapter, type RealtimeAdapter } from './adapter.js';
 import { presenceStore, type PresenceStore } from './presence.js';
 import { communityEventBus } from './communityEvents.js';
 import { groupEventBus } from './groupEvents.js';
+import { channelEventBus } from './channelEvents.js';
 import { groupRepository } from '../modules/groups/group.repository.js';
 import { communityRepository } from '../modules/communities/community.repository.js';
+import { channelRepository } from '../modules/channels/channel.repository.js';
 import { messageService } from '../modules/messages/message.service.js';
 import { groupMessageService } from '../modules/groupMessages/groupMessage.service.js';
 import {
@@ -16,6 +18,7 @@ import {
   chatMessageReadSchema,
   groupSubscribeSchema,
   communitySubscribeSchema,
+  channelSubscribeSchema,
   chatGroupMessageNewSchema,
   chatGroupAckSchema,
   type ChatMessageNewPayload,
@@ -39,6 +42,9 @@ export const REALTIME_EVENTS = {
   COMMUNITY_SUBSCRIBE: 'community:subscribe',
   COMMUNITY_UNSUBSCRIBE: 'community:unsubscribe',
   COMMUNITY_SUBSCRIBED: 'community:subscribed',
+  CHANNEL_SUBSCRIBE: 'channel:subscribe',
+  CHANNEL_UNSUBSCRIBE: 'channel:unsubscribe',
+  CHANNEL_SUBSCRIBED: 'channel:subscribed',
 } as const;
 
 export interface RealtimeServer {
@@ -75,6 +81,7 @@ export async function createRealtimeServer(
 
   communityEventBus.attach(io);
   groupEventBus.attach(io);
+  channelEventBus.attach(io);
 
   io.on('connection', (socket: Socket) => {
     const { userId } = socket.user!;
@@ -249,6 +256,52 @@ export async function createRealtimeServer(
         return;
       }
       void socket.leave(`community:${parsed.data.communityId}`);
+    });
+
+    // Channel post/reaction live updates. The room-join gate mirrors the
+    // REST access rule (`channelService.getChannel`, S1): PUBLIC channels allow
+    // any authenticated user; PRIVATE channels require an approved subscription
+    // row, so a non-subscriber can never observe a private channel's content or
+    // churn. `channelEventBus` broadcasts post/reaction events to this room and
+    // subscriber joined/left/role events to the room plus the user's own room
+    // (so a leaving member is told before being evicted), and force-evicts
+    // sockets when a user unsubscribes, is removed, or the channel is deleted.
+    socket.on(REALTIME_EVENTS.CHANNEL_SUBSCRIBE, (raw: unknown) => {
+      const parsed = channelSubscribeSchema.safeParse(raw);
+      if (!parsed.success) {
+        logger.warn(
+          { userId, errors: parsed.error.flatten() },
+          'Invalid channel:subscribe payload',
+        );
+        return;
+      }
+      const { channelId } = parsed.data;
+      void (async () => {
+        const channel = await channelRepository.findById(channelId);
+        if (!channel || channel.deletedAt) {
+          return;
+        }
+        if (channel.visibility === 'PRIVATE') {
+          const subscriber = await channelRepository.findSubscriber(channelId, userId);
+          if (!subscriber) {
+            logger.warn(
+              { userId, channelId },
+              'Rejected channel:subscribe from non-subscriber of a private channel',
+            );
+            return;
+          }
+        }
+        await socket.join(`channel:${channelId}`);
+        socket.emit(REALTIME_EVENTS.CHANNEL_SUBSCRIBED, { channelId });
+      })();
+    });
+
+    socket.on(REALTIME_EVENTS.CHANNEL_UNSUBSCRIBE, (raw: unknown) => {
+      const parsed = channelSubscribeSchema.safeParse(raw);
+      if (!parsed.success) {
+        return;
+      }
+      void socket.leave(`channel:${parsed.data.channelId}`);
     });
 
     socket.on(REALTIME_EVENTS.CHAT_GROUP_MESSAGE_NEW, (raw: unknown) => {

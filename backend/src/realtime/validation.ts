@@ -34,6 +34,16 @@ export const communitySubscribeSchema = z.object({
 });
 export type CommunitySubscribePayload = z.infer<typeof communitySubscribeSchema>;
 
+// `channelId` is a real Channel `_id` — validated as an ObjectId so the
+// visibility/subscription lookups in the `channel:subscribe` gate never hit a
+// Mongoose CastError.
+const channelId = z.string().regex(/^[a-f\d]{24}$/i);
+
+export const channelSubscribeSchema = z.object({
+  channelId,
+});
+export type ChannelSubscribePayload = z.infer<typeof channelSubscribeSchema>;
+
 export const chatGroupMessageNewSchema = z.object({
   groupId,
   keyId: z.number().int().positive(),

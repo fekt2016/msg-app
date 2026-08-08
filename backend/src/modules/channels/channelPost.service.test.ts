@@ -33,6 +33,14 @@ vi.mock('../users/mediaStorage.js', () => ({
   },
 }));
 
+vi.mock('../../realtime/channelEvents.js', () => ({
+  channelEventBus: {
+    emitPostNew: vi.fn(),
+    emitPostUpdated: vi.fn(),
+    emitPostDeleted: vi.fn(),
+  },
+}));
+
 import * as channelRepositoryModule from './channel.repository.js';
 import * as channelPostRepositoryModule from './channelPost.repository.js';
 import * as userRepositoryModule from '../auth/user.repository.js';

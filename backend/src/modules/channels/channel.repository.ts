@@ -152,6 +152,11 @@ export const channelRepository = {
     return ChannelSubscriberModel.countDocuments({ channelId });
   },
 
+  async listSubscriberIds(channelId: string): Promise<string[]> {
+    const subscribers = await ChannelSubscriberModel.find({ channelId }).select('userId');
+    return subscribers.map((s) => s.userId.toString());
+  },
+
   async listSubscribers(
     channelId: string,
     page: number,

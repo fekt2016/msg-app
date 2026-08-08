@@ -36,6 +36,7 @@ vi.mock('./channel.repository.js', () => ({
     removeSubscriber: vi.fn(),
     updateSubscriberRole: vi.fn(),
     countSubscribers: vi.fn(),
+    listSubscriberIds: vi.fn(),
     listSubscribers: vi.fn(),
     listSubscriptionsForUser: vi.fn(),
     createInvite: vi.fn(),

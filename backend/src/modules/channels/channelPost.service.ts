@@ -2,6 +2,7 @@ import { AppError } from '../../errors/AppError.js';
 import { channelService } from './channel.service.js';
 import { channelRepository } from './channel.repository.js';
 import { channelPostRepository } from './channelPost.repository.js';
+import { channelEventBus } from '../../realtime/channelEvents.js';
 import { userRepository } from '../auth/user.repository.js';
 import {
   isSupportedImage,
@@ -65,7 +66,9 @@ export const channelPostService = {
     const post = await channelPostRepository.createPost(channel.id, userId, body);
     await channelRepository.incrementPostCount(channel.id, 1);
     const [safePost] = await enrichAuthors([post]);
-    return safePost!;
+    const enriched = safePost!;
+    channelEventBus.emitPostNew(channel.id, enriched);
+    return enriched;
   },
 
   async listPosts(
@@ -98,19 +101,22 @@ export const channelPostService = {
     postId: string,
     body: string,
   ): Promise<SafePost> {
-    const { post } = await this.resolvePostForModification(userId, identifier, postId);
+    const { channel, post } = await this.resolvePostForModification(userId, identifier, postId);
     const updated = await channelPostRepository.updatePostBody(post._id.toString(), body);
     if (!updated) {
       throw new AppError(404, 'POST_NOT_FOUND', 'Post not found');
     }
     const [safePost] = await enrichAuthors([updated]);
-    return safePost!;
+    const enriched = safePost!;
+    channelEventBus.emitPostUpdated(channel.id, enriched);
+    return enriched;
   },
 
   async softDeletePost(userId: string, identifier: string, postId: string): Promise<void> {
     const { channel, post } = await this.resolvePostForModification(userId, identifier, postId);
     await channelPostRepository.softDeletePost(post._id.toString());
     await channelRepository.incrementPostCount(channel.id, -1);
+    channelEventBus.emitPostDeleted(channel.id, post._id.toString());
   },
 
   async addPostImage(
@@ -127,7 +133,7 @@ export const channelPostService = {
     if (!sniffImageMimeType(file.buffer)) {
       throw new AppError(422, 'INVALID_FILE_TYPE', 'Only JPEG, PNG or WebP images are allowed');
     }
-    const { post } = await this.resolvePostForModification(userId, identifier, postId);
+    const { channel, post } = await this.resolvePostForModification(userId, identifier, postId);
     const asset = await mediaStorage.uploadPostImage(file);
     const order = (post.images ?? []).length;
     const updated = await channelPostRepository.appendPostImage(post._id.toString(), {
@@ -140,7 +146,9 @@ export const channelPostService = {
       throw new AppError(404, 'POST_NOT_FOUND', 'Post not found');
     }
     const [safePost] = await enrichAuthors([updated]);
-    return safePost!;
+    const enriched = safePost!;
+    channelEventBus.emitPostUpdated(channel.id, enriched);
+    return enriched;
   },
 
   /**

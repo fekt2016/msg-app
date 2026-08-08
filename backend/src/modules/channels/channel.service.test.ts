@@ -2,6 +2,25 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as channelRepositoryModule from './channel.repository.js';
 import { channelService } from './channel.service.js';
 
+vi.mock('../../realtime/channelEvents.js', () => ({
+  CHANNEL_EVENTS: {
+    POST_NEW: 'channel:post:new',
+    POST_UPDATED: 'channel:post:updated',
+    POST_DELETED: 'channel:post:deleted',
+    POST_REACTION: 'channel:post:reaction',
+    SUBSCRIBER_JOINED: 'channel:subscriber:joined',
+    SUBSCRIBER_LEFT: 'channel:subscriber:left',
+    SUBSCRIBER_ROLE: 'channel:subscriber:role',
+    DELETED: 'channel:deleted',
+  },
+  channelEventBus: {
+    emitSubscriberJoined: vi.fn(),
+    emitSubscriberLeft: vi.fn(),
+    emitSubscriberRole: vi.fn(),
+    emitDeleted: vi.fn(),
+  },
+}));
+
 vi.mock('./channel.repository.js', () => ({
   channelRepository: {
     create: vi.fn(),
@@ -19,6 +38,7 @@ vi.mock('./channel.repository.js', () => ({
     removeSubscriber: vi.fn(),
     updateSubscriberRole: vi.fn(),
     countSubscribers: vi.fn(),
+    listSubscriberIds: vi.fn(),
     listSubscribers: vi.fn(),
     listSubscriptionsForUser: vi.fn(),
     createInvite: vi.fn(),

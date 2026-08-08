@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { AppError } from '../../errors/AppError.js';
 import { channelRepository } from './channel.repository.js';
+import { channelEventBus } from '../../realtime/channelEvents.js';
 import type { ChannelRole } from './channelSubscriber.model.js';
 import type { InviteRole } from './channelInvite.model.js';
 import type { ChannelInviteDoc } from './channelInvite.model.js';
@@ -160,7 +161,9 @@ export const channelService = {
 
   async softDelete(userId: string, identifier: string): Promise<void> {
     const channel = await this.getForAdmin(identifier, userId, 'DELETE');
+    const subscriberIds = await channelRepository.listSubscriberIds(channel.id);
     await channelRepository.softDelete(channel.id);
+    channelEventBus.emitDeleted(channel.id, subscriberIds);
   },
 
   async subscribe(userId: string, identifier: string): Promise<ChannelWithSubscription> {
@@ -178,6 +181,7 @@ export const channelService = {
     }
     await channelRepository.addSubscriber(channel.id, userId, 'SUBSCRIBER');
     await channelRepository.incrementSubscriberCount(channel.id, 1);
+    channelEventBus.emitSubscriberJoined(channel.id, userId, 'SUBSCRIBER');
     return {
       ...channel,
       isSubscribed: true,
@@ -201,6 +205,7 @@ export const channelService = {
     }
     await channelRepository.removeSubscriber(channel.id, userId);
     await channelRepository.incrementSubscriberCount(channel.id, -1);
+    channelEventBus.emitSubscriberLeft(channel.id, userId);
     return {
       ...channel,
       isSubscribed: false,
@@ -231,6 +236,7 @@ export const channelService = {
       throw new AppError(400, 'CANNOT_MODIFY_OWNER', 'The owner role cannot be changed');
     }
     await channelRepository.updateSubscriberRole(channel.id, targetUserId, role);
+    channelEventBus.emitSubscriberRole(channel.id, targetUserId, role);
   },
 
   async listSubscribers(
@@ -320,6 +326,7 @@ export const channelService = {
     await channelRepository.addSubscriber(channelId, userId, invite.role);
     await channelRepository.incrementSubscriberCount(channelId, 1);
     await channelRepository.incrementInviteUsed(invite._id.toString());
+    channelEventBus.emitSubscriberJoined(channelId, userId, invite.role);
     return {
       channel: toSafeChannel(channel),
       role: invite.role,
@@ -397,6 +404,7 @@ export const channelService = {
       }
       await channelRepository.addSubscriber(channel.id, targetUserId, 'SUBSCRIBER');
       await channelRepository.incrementSubscriberCount(channel.id, 1);
+      channelEventBus.emitSubscriberJoined(channel.id, targetUserId, 'SUBSCRIBER');
     }
     const status = action === 'APPROVE' ? 'APPROVED' : 'DENIED';
     await channelRepository.setJoinRequestStatus(channel.id, targetUserId, status, actorId);
