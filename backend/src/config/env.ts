@@ -38,6 +38,10 @@ const envSchema = z.object({
   CHANNEL_POST_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(30),
   STORY_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(900000),
   STORY_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(20),
+  // Mark-viewed is hit once per story as the feed scrolls, so its tier is
+  // lighter (higher ceiling) than story creation.
+  STORY_VIEW_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(900000),
+  STORY_VIEW_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(300),
   STORY_TTL_HOURS: z.coerce.number().int().positive().default(24),
   STORY_MEDIA_MAX_SIZE_MB: z.coerce.number().positive().default(25),
   OTP_EXPIRES_IN_MINUTES: z.coerce.number().int().positive().default(10),

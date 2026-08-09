@@ -93,40 +93,54 @@ export function isSupportedVideoMime(mimetype: string): mimetype is SupportedVid
 }
 
 /**
- * Magic-byte (content-sniffing) signatures for the three supported video types.
- * Same role as `MAGIC_BYTE_SIGNATURES` for images — the authoritative type
- * check for story media; `Content-Type` is client-supplied and never trusted
- * alone (CLAUDE.md §11).
+ * ISO Base Media File Format (MP4/MOV) video major brands. An explicit allowlist
+ * (fail-closed — a `ftyp` box is still required) but broad enough to accept the
+ * brands real-world encoders emit. Deliberately EXCLUDES image/audio `ftyp`
+ * brands (`heic`, `mif1`, `avif`, `M4A `) so a still-image or audio container in
+ * an ISO-BMFF wrapper is never accepted as video.
  */
-const VIDEO_MAGIC_BYTE_SIGNATURES: Record<SupportedVideoMimeType, (buffer: Buffer) => boolean> = {
-  'video/mp4': (buffer) =>
-    buffer.length >= 12 &&
-    buffer.toString('ascii', 4, 8) === 'ftyp' &&
-    (buffer.toString('ascii', 8, 12) === 'isom' ||
-      buffer.toString('ascii', 8, 12) === 'mp42' ||
-      buffer.toString('ascii', 8, 12) === 'avc1'),
-  'video/quicktime': (buffer) =>
-    buffer.length >= 12 &&
-    buffer.toString('ascii', 4, 8) === 'ftyp' &&
-    buffer.toString('ascii', 8, 12) === 'qt  ',
-  'video/webm': (buffer) =>
-    buffer.length >= 4 &&
-    buffer[0] === 0x1a &&
-    buffer[1] === 0x45 &&
-    buffer[2] === 0xdf &&
-    buffer[3] === 0xa3,
-};
+const MP4_VIDEO_BRANDS = new Set([
+  'isom',
+  'iso2',
+  'iso4',
+  'iso5',
+  'iso6',
+  'mp41',
+  'mp42',
+  'mp71',
+  'avc1',
+  'mmp4',
+  'M4V ',
+  'dash',
+  'MSNV',
+  '3gp4',
+  '3gp5',
+]);
 
 /**
  * Detects the actual video type from the file's magic bytes, ignoring the
  * client-supplied `Content-Type`. Returns `null` when the bytes don't match any
- * supported signature (including a spoofed header on a non-video payload).
+ * supported signature (including a spoofed header on a non-video payload). The
+ * authoritative type check for story media; `Content-Type` is never trusted
+ * alone (CLAUDE.md §11).
  */
 export function sniffVideoMimeType(buffer: Buffer): SupportedVideoMimeType | null {
-  for (const mimetype of Object.keys(VIDEO_MAGIC_BYTE_SIGNATURES) as SupportedVideoMimeType[]) {
-    if (VIDEO_MAGIC_BYTE_SIGNATURES[mimetype](buffer)) {
-      return mimetype;
-    }
+  // WebM (and Matroska) share the EBML header. Cloudinary is authoritative on
+  // the stored resource type, so treating a rare MKV as webm here is harmless.
+  if (
+    buffer.length >= 4 &&
+    buffer[0] === 0x1a &&
+    buffer[1] === 0x45 &&
+    buffer[2] === 0xdf &&
+    buffer[3] === 0xa3
+  ) {
+    return 'video/webm';
+  }
+  // ISO-BMFF: require the `ftyp` box (fail-closed), then a known video brand.
+  if (buffer.length >= 12 && buffer.toString('ascii', 4, 8) === 'ftyp') {
+    const brand = buffer.toString('ascii', 8, 12);
+    if (brand === 'qt  ') return 'video/quicktime';
+    if (MP4_VIDEO_BRANDS.has(brand)) return 'video/mp4';
   }
   return null;
 }
@@ -135,9 +149,7 @@ export function sniffVideoMimeType(buffer: Buffer): SupportedVideoMimeType | nul
  * Detects whether a buffer is a supported image or video, returning the
  * server-detected media resource type. The authoritative gate for story media.
  */
-export function sniffStoryMedia(
-  buffer: Buffer,
-): {
+export function sniffStoryMedia(buffer: Buffer): {
   resourceType: 'IMAGE' | 'VIDEO';
   mimetype: SupportedImageMimeType | SupportedVideoMimeType;
 } | null {

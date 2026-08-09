@@ -113,8 +113,17 @@ export function createApp(): Express {
     legacyHeaders: false,
     store: buildRateLimitStore(env.STORY_RATE_LIMIT_WINDOW_MS),
   });
+  const storyViewLimiter = rateLimit({
+    windowMs: env.STORY_VIEW_RATE_LIMIT_WINDOW_MS,
+    max: env.STORY_VIEW_RATE_LIMIT_MAX,
+    standardHeaders: true,
+    legacyHeaders: false,
+    store: buildRateLimitStore(env.STORY_VIEW_RATE_LIMIT_WINDOW_MS),
+  });
   // Stories are media (Cloudinary cost) + a spam vector — tighter than general.
   apiV1.post('/stories', storyLimiter);
+  // Mark-viewed fires as the feed scrolls — its own lighter (higher) tier.
+  apiV1.post('/stories/:storyId/views', storyViewLimiter);
   apiV1.use('/stories', storyRouter);
   apiV1.use('/groups', groupRouter);
   apiV1.use('/messages', messageRouter);
