@@ -407,14 +407,22 @@ class LoggingMediaStorage implements MediaStorage {
   async uploadStoryMedia(file: UploadableFile): Promise<StoryMediaAsset> {
     logger.info(
       { name: file.originalname, size: file.buffer.length, type: file.mimetype },
-      '[STORAGE] Story media upload skipped — Cloudinary not configured',
+      '[STORAGE] Story media upload skipped — Cloudinary not configured; using a dev placeholder URL',
     );
+    // `Story.media.url` is required, so the dev fallback must return a valid,
+    // non-empty URL (an empty string fails Mongoose validation → 500). Serve a
+    // type-appropriate public placeholder so dev/demo posting works without
+    // Cloudinary configured.
+    const isVideo = file.mimetype.startsWith('video/') || isSupportedVideoMime(file.mimetype);
     return {
-      publicId: `dev-${Date.now()}`,
-      url: '',
-      width: 0,
-      height: 0,
-      resourceType: 'IMAGE',
+      publicId: `dev-story-${Date.now()}`,
+      url: isVideo
+        ? 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4'
+        : 'https://picsum.photos/seed/eaz-story/720/1280',
+      width: 720,
+      height: 1280,
+      resourceType: isVideo ? 'VIDEO' : 'IMAGE',
+      durationMs: isVideo ? 15000 : undefined,
     };
   }
 
