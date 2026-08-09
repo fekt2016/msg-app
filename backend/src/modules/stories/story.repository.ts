@@ -1,4 +1,4 @@
-import type { QueryFilter } from 'mongoose';
+import type { QueryFilter, Types } from 'mongoose';
 import { StoryModel, type StoryDoc } from './story.model.js';
 import { StoryViewModel, type StoryViewDoc } from './storyView.model.js';
 
@@ -55,7 +55,10 @@ export const storyRepository = {
     page: number,
     pageSize: number,
   ): Promise<{ authorId: string; stories: StoryDoc[]; latestAt: Date }[]> {
-    const authors = await StoryModel.aggregate<{ _id: string; latestAt: Date }>([
+    // `_id` here is the grouped `authorId` — a BSON ObjectId at runtime (the
+    // generic is only a cast). Normalize to a string id everywhere so map
+    // lookups against `story.authorId.toString()` actually hit.
+    const authors = await StoryModel.aggregate<{ _id: Types.ObjectId; latestAt: Date }>([
       { $match: { expiresAt: { $gt: new Date() } } },
       { $sort: { createdAt: -1 } },
       { $group: { _id: '$authorId', latestAt: { $first: '$createdAt' } } },
@@ -87,13 +90,15 @@ export const storyRepository = {
       }
     }
 
-    const latestByAuthor = new Map(authors.map((a) => [a._id, a.latestAt]));
     return authors
-      .map((a) => ({
-        authorId: a._id,
-        stories: byAuthor.get(a._id) ?? [],
-        latestAt: latestByAuthor.get(a._id) ?? new Date(0),
-      }))
+      .map((a) => {
+        const authorId = a._id.toString();
+        return {
+          authorId,
+          stories: byAuthor.get(authorId) ?? [],
+          latestAt: a.latestAt,
+        };
+      })
       .filter((a) => a.stories.length > 0);
   },
 
