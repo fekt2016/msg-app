@@ -417,7 +417,7 @@ class LoggingMediaStorage implements MediaStorage {
     return {
       publicId: `dev-story-${Date.now()}`,
       url: isVideo
-        ? 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4'
+        ? 'https://media.w3.org/2010/05/sintel/trailer.mp4'
         : 'https://picsum.photos/seed/eaz-story/720/1280',
       width: 720,
       height: 1280,

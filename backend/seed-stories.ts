@@ -26,18 +26,59 @@ const creators = [
   { email: 'esi.demo@eaz.test', displayName: 'Esi Demo' },
 ];
 
-const SAMPLE_BASE = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample';
-const videos: { file: string; caption: string; durationMs: number }[] = [
-  { file: 'BigBuckBunny.mp4', caption: 'Big Buck Bunny 🐰', durationMs: 15000 },
-  { file: 'ElephantsDream.mp4', caption: 'Elephants Dream 🐘', durationMs: 15000 },
-  { file: 'ForBiggerBlazes.mp4', caption: 'Bigger blazes 🔥', durationMs: 15000 },
-  { file: 'ForBiggerEscapes.mp4', caption: 'Weekend escape 🏝️', durationMs: 15000 },
-  { file: 'ForBiggerFun.mp4', caption: 'Just for fun 🎉', durationMs: 15000 },
-  { file: 'ForBiggerJoyrides.mp4', caption: 'Joyride 🚗', durationMs: 15000 },
-  { file: 'ForBiggerMeltdowns.mp4', caption: 'Meltdown moment 😅', durationMs: 15000 },
-  { file: 'Sintel.mp4', caption: 'Sintel ⚔️', durationMs: 15000 },
-  { file: 'SubaruOutbackOnStreetAndDirt.mp4', caption: 'On street and dirt 🛣️', durationMs: 15000 },
-  { file: 'TearsOfSteel.mp4', caption: 'Tears of Steel 🤖', durationMs: 15000 },
+// Public sample MP4s that return 200 video/mp4 (the old gtv-videos-bucket URLs
+// now 403). Mixed across a few reliable hosts.
+const videos: { url: string; caption: string; durationMs: number }[] = [
+  {
+    url: 'https://media.w3.org/2010/05/sintel/trailer.mp4',
+    caption: 'Sintel ⚔️',
+    durationMs: 15000,
+  },
+  {
+    url: 'https://media.w3.org/2010/05/bunny/movie.mp4',
+    caption: 'Big Buck Bunny 🐰',
+    durationMs: 15000,
+  },
+  {
+    url: 'https://download.samplelib.com/mp4/sample-5s.mp4',
+    caption: 'Quick clip ⚡',
+    durationMs: 5000,
+  },
+  {
+    url: 'https://download.samplelib.com/mp4/sample-10s.mp4',
+    caption: 'On the road 🚗',
+    durationMs: 10000,
+  },
+  {
+    url: 'https://download.samplelib.com/mp4/sample-15s.mp4',
+    caption: 'Sunset vibes 🌅',
+    durationMs: 15000,
+  },
+  {
+    url: 'https://download.samplelib.com/mp4/sample-20s.mp4',
+    caption: 'Weekend escape 🏝️',
+    durationMs: 20000,
+  },
+  {
+    url: 'https://download.samplelib.com/mp4/sample-30s.mp4',
+    caption: 'Just for fun 🎉',
+    durationMs: 30000,
+  },
+  {
+    url: 'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_1MB.mp4',
+    caption: 'Bunny in 720p 🐰',
+    durationMs: 10000,
+  },
+  {
+    url: 'https://test-videos.co.uk/vids/jellyfish/mp4/h264/720/Jellyfish_720_10s_1MB.mp4',
+    caption: 'Jellyfish 🪼',
+    durationMs: 10000,
+  },
+  {
+    url: 'https://test-videos.co.uk/vids/sintel/mp4/h264/720/Sintel_720_10s_1MB.mp4',
+    caption: 'Sintel 720p ⚔️',
+    durationMs: 10000,
+  },
 ];
 
 async function main(): Promise<void> {
@@ -74,7 +115,7 @@ async function main(): Promise<void> {
     authorId: authorIds[i % authorIds.length],
     media: {
       publicId: `${MOCK_PREFIX}-${i + 1}`,
-      url: `${SAMPLE_BASE}/${v.file}`,
+      url: v.url,
       width: 1280,
       height: 720,
       resourceType: 'VIDEO' as const,
