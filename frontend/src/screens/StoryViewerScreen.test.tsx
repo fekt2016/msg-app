@@ -22,6 +22,8 @@ jest.mock('../api/stories', () => ({
   deleteStory: jest.fn(),
   markStoryViewed: jest.fn(),
   listStoryViewers: jest.fn(),
+  likeStory: jest.fn(),
+  unlikeStory: jest.fn(),
 }));
 
 jest.mock('../hooks/useStories', () => {
@@ -31,6 +33,8 @@ jest.mock('../hooks/useStories', () => {
     useStoryFeed: jest.fn(),
     useMarkStoryViewed: jest.fn(),
     useStoryViewers: jest.fn(),
+    useLikeStory: jest.fn(),
+    useUnlikeStory: jest.fn(),
   };
 });
 
@@ -51,14 +55,24 @@ jest.mock('../auth/AuthContext', () => ({
   }),
 }));
 
-import { useStoryFeed, useMarkStoryViewed, useStoryViewers } from '../hooks/useStories';
+import {
+  useStoryFeed,
+  useMarkStoryViewed,
+  useStoryViewers,
+  useLikeStory,
+  useUnlikeStory,
+} from '../hooks/useStories';
 
 const mockUseStoryFeed = useStoryFeed as unknown as jest.Mock;
 const mockMarkViewed = useMarkStoryViewed as unknown as jest.Mock;
 const mockUseStoryViewers = useStoryViewers as unknown as jest.Mock;
+const mockUseLikeStory = useLikeStory as unknown as jest.Mock;
+const mockUseUnlikeStory = useUnlikeStory as unknown as jest.Mock;
 const mockRealtimeClient = client.realtimeClient as unknown as { connect: jest.Mock };
 
 let mutateViewed: jest.Mock;
+let mutateLike: jest.Mock;
+let mutateUnlike: jest.Mock;
 
 const imageStory = {
   id: 's1',
@@ -68,6 +82,8 @@ const imageStory = {
   expiresAt: '2026-01-02T00:00:00.000Z',
   createdAt: '2026-01-01T00:00:00.000Z',
   hasViewed: false,
+  hasLiked: false,
+  likeCount: 2,
 };
 
 const videoStory = {
@@ -83,6 +99,8 @@ const videoStory = {
   expiresAt: '2026-01-02T00:00:00.000Z',
   createdAt: '2026-01-01T00:00:00.000Z',
   hasViewed: false,
+  hasLiked: false,
+  likeCount: 0,
 };
 
 function feedState(authorId: string, stories: Array<typeof imageStory | typeof videoStory>) {
@@ -120,6 +138,10 @@ async function renderViewer(
   mockUseStoryFeed.mockReturnValue(feedState('u2', stories));
   mutateViewed = jest.fn();
   mockMarkViewed.mockReturnValue({ mutate: mutateViewed });
+  mutateLike = jest.fn();
+  mutateUnlike = jest.fn();
+  mockUseLikeStory.mockReturnValue({ mutate: mutateLike });
+  mockUseUnlikeStory.mockReturnValue({ mutate: mutateUnlike });
   mockUseStoryViewers.mockReturnValue({ data: undefined });
   mockRealtimeClient.connect.mockReturnValue(makeSocket());
   await render(
@@ -193,11 +215,44 @@ describe('StoryViewerScreen', () => {
     expect(screen.getByText('Sunset over Accra')).toBeOnTheScreen();
   });
 
+  it('likes a story from the heart button', async () => {
+    const navigation = { navigate: jest.fn(), goBack: jest.fn() };
+    await renderViewer(navigation, [imageStory]);
+
+    expect(await screen.findByText('Sunset over Accra')).toBeOnTheScreen();
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Like story' }));
+
+    expect(mutateLike).toHaveBeenCalledWith('s1');
+    expect(mutateUnlike).not.toHaveBeenCalled();
+  });
+
+  it('unlikes an already-liked story', async () => {
+    const navigation = { navigate: jest.fn(), goBack: jest.fn() };
+    await renderViewer(navigation, [{ ...imageStory, hasLiked: true, likeCount: 3 }]);
+
+    expect(await screen.findByText('Sunset over Accra')).toBeOnTheScreen();
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Unlike story' }));
+
+    expect(mutateUnlike).toHaveBeenCalledWith('s1');
+    expect(mutateLike).not.toHaveBeenCalled();
+  });
+
+  it('shows the like count on a story', async () => {
+    const navigation = { navigate: jest.fn(), goBack: jest.fn() };
+    await renderViewer(navigation, [{ ...imageStory, likeCount: 5 }]);
+
+    expect(await screen.findByText('5')).toBeOnTheScreen();
+  });
+
   it('renders a fallback when the ring is gone', async () => {
     const navigation = { navigate: jest.fn(), goBack: jest.fn() };
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     mockUseStoryFeed.mockReturnValue({ data: { items: [], total: 0, page: 1, pageSize: 20 } });
     mockMarkViewed.mockReturnValue({ mutate: jest.fn() });
+    mockUseLikeStory.mockReturnValue({ mutate: jest.fn() });
+    mockUseUnlikeStory.mockReturnValue({ mutate: jest.fn() });
     mockUseStoryViewers.mockReturnValue({ data: undefined });
     mockRealtimeClient.connect.mockReturnValue(makeSocket());
     await render(

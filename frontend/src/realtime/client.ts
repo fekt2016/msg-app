@@ -43,6 +43,8 @@ export const REALTIME_EVENTS = {
   STORY_NEW: 'story:new',
   STORY_DELETED: 'story:deleted',
   STORY_VIEWED: 'story:viewed',
+  STORY_LIKED: 'story:liked',
+  STORY_UNLIKED: 'story:unliked',
 } as const;
 
 export interface EncryptedMessageEvent {
@@ -179,6 +181,8 @@ export interface StoryPayload {
   expiresAt: string;
   createdAt: string;
   hasViewed: boolean;
+  hasLiked: boolean;
+  likeCount: number;
   viewCount?: number;
 }
 
@@ -199,6 +203,14 @@ export interface StoryDeletedEvent {
 export interface StoryViewedEvent {
   storyId: string;
   viewerId: string;
+  at: string;
+}
+
+/** A story was liked/unliked — targeted to the author's `user:{id}` room. */
+export interface StoryLikeEvent {
+  storyId: string;
+  userId: string;
+  likeCount: number;
   at: string;
 }
 

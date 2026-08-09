@@ -25,11 +25,19 @@ jest.mock('../hooks/useStories', () => ({
   storyKeys: { feed: () => ['stories', 'feed'] },
   useStoryFeed: jest.fn(),
   useMarkStoryViewedInFeed: jest.fn(() => ({ mutate: jest.fn() })),
+  useLikeStory: jest.fn(() => ({ mutate: jest.fn() })),
+  useUnlikeStory: jest.fn(() => ({ mutate: jest.fn() })),
 }));
 
 const mockUseStoryFeed = storiesHooks.useStoryFeed as jest.Mock;
+const mockUseLikeStory = storiesHooks.useLikeStory as jest.Mock;
+const mockUseUnlikeStory = storiesHooks.useUnlikeStory as jest.Mock;
 
-function story(id: string, caption: string) {
+function story(
+  id: string,
+  caption: string,
+  overrides: { hasLiked?: boolean; likeCount?: number } = {},
+) {
   return {
     id,
     authorId: `author-${id}`,
@@ -38,6 +46,8 @@ function story(id: string, caption: string) {
     expiresAt: new Date(Date.now() + 3600_000).toISOString(),
     createdAt: new Date(Date.now() - 3600_000).toISOString(),
     hasViewed: false,
+    hasLiked: overrides.hasLiked ?? false,
+    likeCount: overrides.likeCount ?? 0,
   };
 }
 
@@ -78,9 +88,13 @@ describe('HomeScreen (stories feed)', () => {
     expect(screen.getByText('Sunny in Accra')).toBeOnTheScreen();
   });
 
-  it('toggles the like icon on a story', async () => {
+  it('likes an unliked story via the like mutation', async () => {
+    const likeMutate = jest.fn();
+    mockUseLikeStory.mockReturnValue({ mutate: likeMutate });
     mockUseStoryFeed.mockReturnValue({
-      data: { items: [feedItem('author-1', 'Ama', [story('s1', 'Sunny in Accra')])] },
+      data: {
+        items: [feedItem('author-1', 'Ama', [story('s1', 'Sunny in Accra', { likeCount: 4 })])],
+      },
       isLoading: false,
       isError: false,
       refetch: jest.fn(),
@@ -89,8 +103,30 @@ describe('HomeScreen (stories feed)', () => {
     const navigation = { navigate: jest.fn() };
     await renderHome(navigation);
 
+    expect(await screen.findByText('4')).toBeOnTheScreen(); // like count shown
     await fireEvent.press(await screen.findByRole('button', { name: 'Like story' }));
-    expect(screen.getByRole('button', { name: 'Unlike story' })).toBeOnTheScreen();
+    expect(likeMutate).toHaveBeenCalledWith('s1');
+  });
+
+  it('unlikes an already-liked story via the unlike mutation', async () => {
+    const unlikeMutate = jest.fn();
+    mockUseUnlikeStory.mockReturnValue({ mutate: unlikeMutate });
+    mockUseStoryFeed.mockReturnValue({
+      data: {
+        items: [
+          feedItem('author-1', 'Ama', [story('s1', 'Cap', { hasLiked: true, likeCount: 5 })]),
+        ],
+      },
+      isLoading: false,
+      isError: false,
+      refetch: jest.fn(),
+    });
+
+    const navigation = { navigate: jest.fn() };
+    await renderHome(navigation);
+
+    await fireEvent.press(await screen.findByRole('button', { name: 'Unlike story' }));
+    expect(unlikeMutate).toHaveBeenCalledWith('s1');
   });
 
   it('shows an empty state and opens the create screen', async () => {

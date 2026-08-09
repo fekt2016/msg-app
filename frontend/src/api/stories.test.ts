@@ -5,6 +5,8 @@ import {
   deleteStory,
   markStoryViewed,
   listStoryViewers,
+  likeStory,
+  unlikeStory,
 } from './stories';
 import { apiClient } from './client';
 
@@ -40,6 +42,8 @@ const story = {
   expiresAt: '2026-01-02T00:00:00.000Z',
   createdAt: '2026-01-01T00:00:00.000Z',
   hasViewed: false,
+  hasLiked: false,
+  likeCount: 0,
 };
 
 const envelope = <T>(data: T, meta?: Record<string, unknown>) => ({
@@ -141,6 +145,24 @@ describe('stories api', () => {
 
     expect(mockClient.post).toHaveBeenCalledWith('/stories/s1/views');
     expect(result.viewed).toBe(true);
+  });
+
+  it('likes a story via PUT and returns the authoritative count', async () => {
+    mockClient.put.mockResolvedValue({ data: envelope({ liked: true, likeCount: 3 }) });
+
+    const result = await likeStory('s1');
+
+    expect(mockClient.put).toHaveBeenCalledWith('/stories/s1/like');
+    expect(result).toEqual({ liked: true, likeCount: 3 });
+  });
+
+  it('unlikes a story via DELETE and returns the authoritative count', async () => {
+    mockClient.delete.mockResolvedValue({ data: envelope({ liked: false, likeCount: 2 }) });
+
+    const result = await unlikeStory('s1');
+
+    expect(mockClient.delete).toHaveBeenCalledWith('/stories/s1/like');
+    expect(result).toEqual({ liked: false, likeCount: 2 });
   });
 
   it('lists story viewers with meta', async () => {

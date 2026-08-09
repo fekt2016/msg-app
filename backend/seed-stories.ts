@@ -26,43 +26,25 @@ const creators = [
   { email: 'esi.demo@eaz.test', displayName: 'Esi Demo' },
 ];
 
-// Public sample MP4s that return 200 video/mp4 (the old gtv-videos-bucket URLs
-// now 403). Mixed across a few reliable hosts.
+// Public sample MP4s that return 200 video/mp4. All clips are short (~10s) and
+// ~1MB so full-screen emulator playback never exhausts the app heap — the old
+// seed used a 249MB 1080p movie (bunny/movie.mp4) and samplelib URLs that now
+// 301 to an HTML error page, which OOM'd / failed playback on device.
 const videos: { url: string; caption: string; durationMs: number }[] = [
   {
-    url: 'https://media.w3.org/2010/05/sintel/trailer.mp4',
-    caption: 'Sintel ⚔️',
-    durationMs: 15000,
-  },
-  {
-    url: 'https://media.w3.org/2010/05/bunny/movie.mp4',
-    caption: 'Big Buck Bunny 🐰',
-    durationMs: 15000,
-  },
-  {
-    url: 'https://download.samplelib.com/mp4/sample-5s.mp4',
-    caption: 'Quick clip ⚡',
-    durationMs: 5000,
-  },
-  {
-    url: 'https://download.samplelib.com/mp4/sample-10s.mp4',
-    caption: 'On the road 🚗',
+    url: 'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4',
+    caption: 'Bunny 360p 🐰',
     durationMs: 10000,
   },
   {
-    url: 'https://download.samplelib.com/mp4/sample-15s.mp4',
-    caption: 'Sunset vibes 🌅',
-    durationMs: 15000,
+    url: 'https://test-videos.co.uk/vids/jellyfish/mp4/h264/360/Jellyfish_360_10s_1MB.mp4',
+    caption: 'Jellyfish 360p 🪼',
+    durationMs: 10000,
   },
   {
-    url: 'https://download.samplelib.com/mp4/sample-20s.mp4',
-    caption: 'Weekend escape 🏝️',
-    durationMs: 20000,
-  },
-  {
-    url: 'https://download.samplelib.com/mp4/sample-30s.mp4',
-    caption: 'Just for fun 🎉',
-    durationMs: 30000,
+    url: 'https://test-videos.co.uk/vids/sintel/mp4/h264/360/Sintel_360_10s_1MB.mp4',
+    caption: 'Sintel 360p ⚔️',
+    durationMs: 10000,
   },
   {
     url: 'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_1MB.mp4',
@@ -77,6 +59,26 @@ const videos: { url: string; caption: string; durationMs: number }[] = [
   {
     url: 'https://test-videos.co.uk/vids/sintel/mp4/h264/720/Sintel_720_10s_1MB.mp4',
     caption: 'Sintel 720p ⚔️',
+    durationMs: 10000,
+  },
+  {
+    url: 'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/1080/Big_Buck_Bunny_1080_10s_1MB.mp4',
+    caption: 'Bunny 1080p 🐰',
+    durationMs: 10000,
+  },
+  {
+    url: 'https://test-videos.co.uk/vids/jellyfish/mp4/h264/1080/Jellyfish_1080_10s_1MB.mp4',
+    caption: 'Jellyfish 1080p 🪼',
+    durationMs: 10000,
+  },
+  {
+    url: 'https://test-videos.co.uk/vids/sintel/mp4/h264/1080/Sintel_1080_10s_1MB.mp4',
+    caption: 'Sintel 1080p ⚔️',
+    durationMs: 10000,
+  },
+  {
+    url: 'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_5MB.mp4',
+    caption: 'Bunny extended 🐰',
     durationMs: 10000,
   },
 ];

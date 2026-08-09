@@ -6,12 +6,16 @@ export const STORY_EVENTS = {
   STORY_NEW: 'story:new',
   STORY_DELETED: 'story:deleted',
   STORY_VIEWED: 'story:viewed',
+  STORY_LIKED: 'story:liked',
+  STORY_UNLIKED: 'story:unliked',
 } as const;
 
 interface StoryEventBus {
   emitStoryNew(story: SafeStory): void;
   emitStoryDeleted(storyId: string, authorId: string): void;
   emitStoryViewed(storyId: string, authorId: string, viewerId: string): void;
+  emitStoryLiked(storyId: string, authorId: string, userId: string, likeCount: number): void;
+  emitStoryUnliked(storyId: string, authorId: string, userId: string, likeCount: number): void;
   attach(io: Server): void;
 }
 
@@ -59,6 +63,30 @@ class StoryEventBusImpl implements StoryEventBus {
     this.io.to(`user:${authorId}`).emit(STORY_EVENTS.STORY_VIEWED, {
       storyId,
       viewerId,
+      at: new Date().toISOString(),
+    });
+  }
+
+  emitStoryLiked(storyId: string, authorId: string, userId: string, likeCount: number): void {
+    if (!this.io) {
+      return;
+    }
+    this.io.to(`user:${authorId}`).emit(STORY_EVENTS.STORY_LIKED, {
+      storyId,
+      userId,
+      likeCount,
+      at: new Date().toISOString(),
+    });
+  }
+
+  emitStoryUnliked(storyId: string, authorId: string, userId: string, likeCount: number): void {
+    if (!this.io) {
+      return;
+    }
+    this.io.to(`user:${authorId}`).emit(STORY_EVENTS.STORY_UNLIKED, {
+      storyId,
+      userId,
+      likeCount,
       at: new Date().toISOString(),
     });
   }

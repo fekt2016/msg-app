@@ -18,6 +18,7 @@ const storySchema = new Schema(
     caption: { type: String, trim: true, maxlength: 500, default: '' },
     expiresAt: { type: Date, required: true },
     viewCount: { type: Number, default: 0 },
+    likeCount: { type: Number, default: 0 },
   },
   { timestamps: true },
 );

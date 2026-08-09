@@ -25,6 +25,8 @@ export interface Story {
   expiresAt: string;
   createdAt: string;
   hasViewed: boolean;
+  hasLiked: boolean;
+  likeCount: number;
   /** Author-only — absent for any other viewer (privacy). */
   viewCount?: number;
 }
@@ -89,6 +91,21 @@ export async function deleteStory(storyId: string): Promise<void> {
 
 export async function markStoryViewed(storyId: string): Promise<{ viewed: boolean }> {
   const res = await apiClient.post<ApiEnvelope<{ viewed: boolean }>>(`/stories/${storyId}/views`);
+  return res.data.data;
+}
+
+export interface StoryLikeResult {
+  liked: boolean;
+  likeCount: number;
+}
+
+export async function likeStory(storyId: string): Promise<StoryLikeResult> {
+  const res = await apiClient.put<ApiEnvelope<StoryLikeResult>>(`/stories/${storyId}/like`);
+  return res.data.data;
+}
+
+export async function unlikeStory(storyId: string): Promise<StoryLikeResult> {
+  const res = await apiClient.delete<ApiEnvelope<StoryLikeResult>>(`/stories/${storyId}/like`);
   return res.data.data;
 }
 

@@ -45,6 +45,18 @@ export const storyController = {
     res.status(200).json(apiResponse(result));
   },
 
+  async like(req: Request, res: Response) {
+    const storyId = String(req.params.storyId);
+    const result = await storyService.like(req.user!.id, storyId);
+    res.status(200).json(apiResponse(result));
+  },
+
+  async unlike(req: Request, res: Response) {
+    const storyId = String(req.params.storyId);
+    const result = await storyService.unlike(req.user!.id, storyId);
+    res.status(200).json(apiResponse(result));
+  },
+
   async listViewers(req: Request, res: Response) {
     const storyId = String(req.params.storyId);
     const { page, pageSize } = req.query as unknown as { page: number; pageSize: number };
