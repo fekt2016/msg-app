@@ -31,6 +31,9 @@ export type AppStackParamList = {
   JoinRequests: { identifier: string };
   Invites: { identifier: string };
   InviteJoin: { token?: string } | undefined;
+  Stories: undefined;
+  StoryViewer: { authorId: string; displayName: string };
+  CreateStory: undefined;
 };
 
 export type RootStackParamList = {

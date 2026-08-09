@@ -5,6 +5,7 @@ import { AuthProvider } from '../auth/AuthContext';
 import { RealtimeProvider } from '../realtime/RealtimeProvider';
 import * as client from '../realtime/client';
 import * as usersApi from '../api/users';
+import * as Contacts from 'expo-contacts';
 
 jest.mock('../api/client', () => ({
   apiClient: {
@@ -59,6 +60,11 @@ const mockClient = client.realtimeClient as unknown as {
 };
 
 const mockUsers = usersApi as jest.Mocked<typeof usersApi>;
+const mockContacts = Contacts as unknown as {
+  getPermissionsAsync: jest.Mock;
+  requestPermissionsAsync: jest.Mock;
+  Contact: { getAllDetails: jest.Mock };
+};
 
 const storedUser = {
   id: 'u1',
@@ -123,6 +129,9 @@ describe('ChatsScreen', () => {
     });
     mockSecure.setItemAsync.mockResolvedValue(undefined);
     mockSecure.deleteItemAsync.mockResolvedValue(undefined);
+    mockContacts.getPermissionsAsync.mockResolvedValue({ granted: true, canAskAgain: true });
+    mockContacts.requestPermissionsAsync.mockResolvedValue({ granted: true });
+    mockContacts.Contact.getAllDetails.mockResolvedValue([]);
   });
 
   it('lists chat users and navigates to a chat on press', async () => {
@@ -191,7 +200,7 @@ describe('ChatsScreen', () => {
     await waitFor(() => {
       expect(screen.queryByText('Ama')).not.toBeOnTheScreen();
     });
-    expect(await screen.findByText(/No chats yet/)).toBeOnTheScreen();
+    expect(await screen.findByText(/No people to chat with yet/)).toBeOnTheScreen();
   });
 
   it('shows an empty state when there are no other users', async () => {
@@ -199,7 +208,7 @@ describe('ChatsScreen', () => {
     const navigation = { navigate: jest.fn() };
     await renderChats(navigation);
 
-    expect(await screen.findByText(/No chats yet/)).toBeOnTheScreen();
+    expect(await screen.findByText(/No people to chat with yet/)).toBeOnTheScreen();
   });
 
   it('recovers from a failed users load by tapping to retry', async () => {
@@ -225,5 +234,60 @@ describe('ChatsScreen', () => {
     await fireEvent.press(screen.getByRole('button', { name: /Could not load chats/ }));
 
     expect(await screen.findByText('Kofi')).toBeOnTheScreen();
+  });
+
+  it('matches friends from contacts and shows them as chat targets', async () => {
+    mockUsers.listUsers.mockResolvedValue([] as never);
+    mockContacts.Contact.getAllDetails.mockResolvedValue([
+      {
+        id: 'c1',
+        givenName: 'Kofi',
+        familyName: 'Mensah',
+        phones: [{ id: 'p1', number: '+233 24 123 4567' }],
+      },
+    ]);
+    mockUsers.matchContacts.mockResolvedValue([
+      {
+        id: 'u2',
+        displayName: 'Kofi Mensah',
+        email: 'kofi@example.com',
+        phone: null,
+        role: 'USER',
+        status: 'VERIFIED',
+        isVerified: true,
+        bio: '',
+        avatar: null,
+      },
+    ] as never);
+
+    const navigation = { navigate: jest.fn() };
+    await renderChats(navigation);
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Find friends from contacts' }));
+
+    await waitFor(() => {
+      expect(mockUsers.matchContacts).toHaveBeenCalledWith(['+233 24 123 4567']);
+    });
+    expect(await screen.findByText('Kofi Mensah')).toBeOnTheScreen();
+
+    await fireEvent.press(screen.getByRole('button', { name: /Kofi Mensah/ }));
+    expect(navigation.navigate).toHaveBeenCalledWith('Chat', {
+      userId: 'u2',
+      displayName: 'Kofi Mensah',
+    });
+  });
+
+  it('shows a hint when contacts access is denied', async () => {
+    mockUsers.listUsers.mockResolvedValue([] as never);
+    mockContacts.getPermissionsAsync.mockResolvedValue({ granted: false, canAskAgain: false });
+    mockContacts.requestPermissionsAsync.mockResolvedValue({ granted: false });
+
+    const navigation = { navigate: jest.fn() };
+    await renderChats(navigation);
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Find friends from contacts' }));
+
+    expect(await screen.findByText(/Contacts access was denied/)).toBeOnTheScreen();
+    expect(mockUsers.matchContacts).not.toHaveBeenCalled();
   });
 });

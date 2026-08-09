@@ -14,6 +14,9 @@ import { ChannelPostComposerScreen } from '../screens/ChannelPostComposerScreen'
 import { JoinRequestScreen } from '../screens/JoinRequestScreen';
 import { InvitesScreen } from '../screens/InvitesScreen';
 import { InviteJoinScreen } from '../screens/InviteJoinScreen';
+import { StoriesScreen } from '../screens/StoriesScreen';
+import { StoryViewerScreen } from '../screens/StoryViewerScreen';
+import { CreateStoryScreen } from '../screens/CreateStoryScreen';
 import type { AppStackParamList } from './types';
 
 const Stack = createNativeStackNavigator<AppStackParamList>();
@@ -41,6 +44,9 @@ export function AppNavigator() {
       <Stack.Screen name="JoinRequests" component={JoinRequestScreen} />
       <Stack.Screen name="Invites" component={InvitesScreen} />
       <Stack.Screen name="InviteJoin" component={InviteJoinScreen} />
+      <Stack.Screen name="Stories" component={StoriesScreen} />
+      <Stack.Screen name="StoryViewer" component={StoryViewerScreen} />
+      <Stack.Screen name="CreateStory" component={CreateStoryScreen} />
     </Stack.Navigator>
   );
 }
