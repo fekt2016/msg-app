@@ -78,6 +78,21 @@ describe('HomeScreen (stories feed)', () => {
     expect(screen.getByText('Sunny in Accra')).toBeOnTheScreen();
   });
 
+  it('toggles the like icon on a story', async () => {
+    mockUseStoryFeed.mockReturnValue({
+      data: { items: [feedItem('author-1', 'Ama', [story('s1', 'Sunny in Accra')])] },
+      isLoading: false,
+      isError: false,
+      refetch: jest.fn(),
+    });
+
+    const navigation = { navigate: jest.fn() };
+    await renderHome(navigation);
+
+    await fireEvent.press(await screen.findByRole('button', { name: 'Like story' }));
+    expect(screen.getByRole('button', { name: 'Unlike story' })).toBeOnTheScreen();
+  });
+
   it('shows an empty state and opens the create screen', async () => {
     mockUseStoryFeed.mockReturnValue({
       data: { items: [] },
