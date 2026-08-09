@@ -100,11 +100,15 @@ export function HomeScreen({ navigation }: Props) {
     }
   }).current;
 
+  // The first story is active by default so its video autoplays on mount,
+  // without waiting for the initial onViewableItemsChanged to fire.
+  const activeStoryId = activeId ?? stories[0]?.story.id ?? null;
+
   const renderItem = useCallback(
     ({ item }: { item: FeedStory }) => (
-      <StoryPage item={item} height={containerHeight} isActive={item.story.id === activeId} />
+      <StoryPage item={item} height={containerHeight} isActive={item.story.id === activeStoryId} />
     ),
-    [containerHeight, activeId],
+    [containerHeight, activeStoryId],
   );
 
   return (
@@ -226,7 +230,9 @@ function StoryPage({
 function FeedVideo({ url, isActive }: { url: string; isActive: boolean }) {
   const player = useVideoPlayer(url, (p) => {
     p.loop = true;
-    p.muted = false;
+    // Muted autoplay is the reliable pattern for a feed (unmuted autoplay is
+    // often blocked, especially on emulators without an audio device).
+    p.muted = true;
   });
 
   useEffect(() => {
@@ -252,8 +258,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.baobabDeep,
   },
   media: {
-    width: '100%',
-    height: '100%',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   scrim: {
     position: 'absolute',
