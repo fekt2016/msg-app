@@ -4,6 +4,7 @@ import {
   FlatList,
   Image,
   Pressable,
+  Share,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -11,6 +12,7 @@ import {
   type ViewToken,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import type { CompositeScreenProps } from '@react-navigation/native';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
@@ -64,6 +66,10 @@ export function HomeScreen({ navigation }: Props) {
   const [measuredHeight, setMeasuredHeight] = useState(0);
   const containerHeight = measuredHeight || window.height;
   const [activeId, setActiveId] = useState<string | null>(null);
+  // One shared mute toggle for the whole feed (TikTok-style). Muted by default
+  // for reliable autoplay; the rail's speaker icon flips it.
+  const [muted, setMuted] = useState(true);
+  const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
   const viewedRef = useRef<Set<string>>(new Set());
 
   // Flatten every author's active stories into one cross-author list and
@@ -100,11 +106,39 @@ export function HomeScreen({ navigation }: Props) {
     }
   }).current;
 
+  // The first story is active by default so its video autoplays on mount,
+  // without waiting for the initial onViewableItemsChanged to fire.
+  const activeStoryId = activeId ?? stories[0]?.story.id ?? null;
+
+  const toggleLike = useCallback((id: string) => {
+    setLikedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleShare = useCallback((story: Story) => {
+    void Share.share({
+      message: story.caption || 'Check out this story on Eaz Community',
+    });
+  }, []);
+
   const renderItem = useCallback(
     ({ item }: { item: FeedStory }) => (
-      <StoryPage item={item} height={containerHeight} isActive={item.story.id === activeId} />
+      <StoryPage
+        item={item}
+        height={containerHeight}
+        isActive={item.story.id === activeStoryId}
+        muted={muted}
+        liked={likedIds.has(item.story.id)}
+        onToggleLike={() => toggleLike(item.story.id)}
+        onToggleMute={() => setMuted((m) => !m)}
+        onShare={() => handleShare(item.story)}
+      />
     ),
-    [containerHeight, activeId],
+    [containerHeight, activeStoryId, muted, likedIds, toggleLike, handleShare],
   );
 
   return (
@@ -187,21 +221,71 @@ function StoryPage({
   item,
   height,
   isActive,
+  muted,
+  liked,
+  onToggleLike,
+  onToggleMute,
+  onShare,
 }: {
   item: FeedStory;
   height: number;
   isActive: boolean;
+  muted: boolean;
+  liked: boolean;
+  onToggleLike: () => void;
+  onToggleMute: () => void;
+  onShare: () => void;
 }) {
   const { story, author } = item;
   return (
     <View style={[styles.page, { height }]}>
       {story.media.resourceType === 'VIDEO' ? (
-        <FeedVideo url={story.media.url} isActive={isActive} />
+        <FeedVideo url={story.media.url} isActive={isActive} muted={muted} />
       ) : (
         <Image source={{ uri: story.media.url }} style={styles.media} resizeMode="cover" />
       )}
 
       <View style={styles.scrim} pointerEvents="none" />
+
+      <View style={styles.actionRail}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={liked ? 'Unlike story' : 'Like story'}
+          onPress={onToggleLike}
+          hitSlop={8}
+          style={styles.railButton}
+        >
+          <Ionicons
+            name={liked ? 'heart' : 'heart-outline'}
+            size={32}
+            color={liked ? colors.terracotta : colors.savanna}
+          />
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Share story"
+          onPress={onShare}
+          hitSlop={8}
+          style={styles.railButton}
+        >
+          <Ionicons name="paper-plane-outline" size={28} color={colors.savanna} />
+        </Pressable>
+        {story.media.resourceType === 'VIDEO' ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={muted ? 'Unmute' : 'Mute'}
+            onPress={onToggleMute}
+            hitSlop={8}
+            style={styles.railButton}
+          >
+            <Ionicons
+              name={muted ? 'volume-mute' : 'volume-high'}
+              size={28}
+              color={colors.savanna}
+            />
+          </Pressable>
+        ) : null}
+      </View>
 
       <View style={styles.metaOverlay} pointerEvents="none">
         <View style={styles.authorRow}>
@@ -223,10 +307,12 @@ function StoryPage({
   );
 }
 
-function FeedVideo({ url, isActive }: { url: string; isActive: boolean }) {
+function FeedVideo({ url, isActive, muted }: { url: string; isActive: boolean; muted: boolean }) {
   const player = useVideoPlayer(url, (p) => {
     p.loop = true;
-    p.muted = false;
+    // Muted autoplay is the reliable pattern for a feed (unmuted autoplay is
+    // often blocked, especially on emulators without an audio device).
+    p.muted = true;
   });
 
   useEffect(() => {
@@ -236,6 +322,10 @@ function FeedVideo({ url, isActive }: { url: string; isActive: boolean }) {
       player.pause();
     }
   }, [isActive, player]);
+
+  useEffect(() => {
+    player.muted = muted;
+  }, [muted, player]);
 
   return (
     <VideoView player={player} style={styles.media} contentFit="cover" nativeControls={false} />
@@ -252,24 +342,43 @@ const styles = StyleSheet.create({
     backgroundColor: colors.baobabDeep,
   },
   media: {
-    width: '100%',
-    height: '100%',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   scrim: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
-    height: '38%',
-    backgroundColor: 'rgba(15, 27, 22, 0.55)',
+    height: '20%',
+    backgroundColor: 'rgba(15, 27, 22, 0.5)',
   },
   metaOverlay: {
     position: 'absolute',
     left: 0,
-    right: 0,
+    // Leave room on the right for the action rail so the caption never overlaps.
+    right: 76,
     bottom: spacing.xxl,
     paddingHorizontal: spacing.lg,
     gap: spacing.sm,
+  },
+  actionRail: {
+    position: 'absolute',
+    right: spacing.md,
+    bottom: spacing.xxl,
+    alignItems: 'center',
+    gap: spacing.lg,
+  },
+  railButton: {
+    width: 48,
+    height: 48,
+    borderRadius: radius.full,
+    backgroundColor: 'rgba(15, 27, 22, 0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   authorRow: {
     flexDirection: 'row',
