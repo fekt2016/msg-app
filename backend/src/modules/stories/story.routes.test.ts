@@ -2,6 +2,7 @@ import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../../app.js';
 import * as storyRepositoryModule from './story.repository.js';
+import * as storyLikeRepositoryModule from './storyLike.repository.js';
 import * as userRepositoryModule from '../auth/user.repository.js';
 import * as mediaStorageModule from '../users/mediaStorage.js';
 import * as storyEventsModule from '../../realtime/storyEvents.js';
@@ -32,11 +33,23 @@ vi.mock('./story.repository.js', () => ({
     listFeed: vi.fn(),
     countActiveAuthors: vi.fn(),
     incrementViewCount: vi.fn(),
+    adjustLikeCount: vi.fn(),
     addView: vi.fn(),
     listViewers: vi.fn(),
     countViews: vi.fn(),
     hasViewed: vi.fn(),
     listViewedStoryIds: vi.fn(),
+  },
+}));
+
+vi.mock('./storyLike.repository.js', () => ({
+  storyLikeRepository: {
+    addLike: vi.fn(),
+    removeLike: vi.fn(),
+    deleteLikesByStoryId: vi.fn(),
+    countLikes: vi.fn(),
+    listLikedStoryIds: vi.fn(),
+    hasLiked: vi.fn(),
   },
 }));
 
@@ -65,10 +78,13 @@ vi.mock('../../realtime/storyEvents.js', () => ({
     emitStoryNew: vi.fn(),
     emitStoryDeleted: vi.fn(),
     emitStoryViewed: vi.fn(),
+    emitStoryLiked: vi.fn(),
+    emitStoryUnliked: vi.fn(),
   },
 }));
 
 const repo = vi.mocked(storyRepositoryModule.storyRepository);
+const likeRepo = vi.mocked(storyLikeRepositoryModule.storyLikeRepository);
 const userRepo = vi.mocked(userRepositoryModule.userRepository);
 const media = vi.mocked(mediaStorageModule.mediaStorage);
 const bus = vi.mocked(storyEventsModule.storyEventBus);
@@ -106,6 +122,7 @@ function fakeStory(overrides: Record<string, unknown> = {}) {
     expiresAt,
     createdAt: now,
     viewCount: 0,
+    likeCount: 0,
     ...overrides,
   } as never;
 }
@@ -305,7 +322,7 @@ describe('GET /api/v1/stories/:storyId', () => {
 });
 
 describe('DELETE /api/v1/stories/:storyId', () => {
-  it("deletes the author's own story and cascades views", async () => {
+  it("deletes the author's own story and cascades views and likes", async () => {
     repo.findById.mockResolvedValue(fakeStory());
 
     const res = await request(app).delete(`/api/v1/stories/${STORY_ID}`).set(AUTH);
@@ -313,6 +330,7 @@ describe('DELETE /api/v1/stories/:storyId', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.deleted).toBe(true);
     expect(repo.deleteViewsByStoryId).toHaveBeenCalledWith(STORY_ID);
+    expect(likeRepo.deleteLikesByStoryId).toHaveBeenCalledWith(STORY_ID);
     expect(repo.deleteById).toHaveBeenCalledWith(STORY_ID);
     expect(media.deleteByPublicId).toHaveBeenCalledWith('story-1');
     expect(bus.emitStoryDeleted).toHaveBeenCalledWith(STORY_ID, 'user-1');
@@ -410,5 +428,84 @@ describe('GET /api/v1/stories/:storyId/views', () => {
 
     expect(res.status).toBe(403);
     expect(repo.listViewers).not.toHaveBeenCalled();
+  });
+});
+
+describe('PUT /api/v1/stories/:storyId/like', () => {
+  it('likes a story, increments the count, and emits story:liked', async () => {
+    repo.findActiveById.mockResolvedValue(fakeStory({ authorId: { toString: () => 'user-2' } }));
+    likeRepo.addLike.mockResolvedValue({ _id: 'like-1' } as never);
+    repo.adjustLikeCount.mockResolvedValue(fakeStory({ likeCount: 1 }));
+
+    const res = await request(app).put(`/api/v1/stories/${STORY_ID}/like`).set(AUTH);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.liked).toBe(true);
+    expect(res.body.data.likeCount).toBe(1);
+    expect(likeRepo.addLike).toHaveBeenCalledWith(
+      expect.objectContaining({ storyId: STORY_ID, userId: 'user-1' }),
+    );
+    expect(repo.adjustLikeCount).toHaveBeenCalledWith(STORY_ID, 1);
+    expect(bus.emitStoryLiked).toHaveBeenCalledWith(STORY_ID, 'user-2', 'user-1', 1);
+  });
+
+  it('is a no-op when already liked (duplicate key)', async () => {
+    repo.findActiveById.mockResolvedValue(fakeStory({ likeCount: 3 }));
+    const dup = Object.assign(new Error('duplicate'), { code: 11000 });
+    likeRepo.addLike.mockRejectedValue(dup);
+
+    const res = await request(app).put(`/api/v1/stories/${STORY_ID}/like`).set(AUTH);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.liked).toBe(true);
+    expect(res.body.data.likeCount).toBe(3);
+    expect(repo.adjustLikeCount).not.toHaveBeenCalled();
+    expect(bus.emitStoryLiked).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 for an expired story', async () => {
+    repo.findActiveById.mockResolvedValue(null);
+
+    const res = await request(app).put(`/api/v1/stories/${STORY_ID}/like`).set(AUTH);
+
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('DELETE /api/v1/stories/:storyId/like', () => {
+  it('unlikes a story, decrements the count, and emits story:unliked', async () => {
+    repo.findActiveById.mockResolvedValue(fakeStory({ authorId: { toString: () => 'user-2' } }));
+    likeRepo.removeLike.mockResolvedValue(1);
+    repo.adjustLikeCount.mockResolvedValue(fakeStory({ likeCount: 0 }));
+
+    const res = await request(app).delete(`/api/v1/stories/${STORY_ID}/like`).set(AUTH);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.liked).toBe(false);
+    expect(res.body.data.likeCount).toBe(0);
+    expect(likeRepo.removeLike).toHaveBeenCalledWith(STORY_ID, 'user-1');
+    expect(repo.adjustLikeCount).toHaveBeenCalledWith(STORY_ID, -1);
+    expect(bus.emitStoryUnliked).toHaveBeenCalledWith(STORY_ID, 'user-2', 'user-1', 0);
+  });
+
+  it('is a no-op when the story was never liked', async () => {
+    repo.findActiveById.mockResolvedValue(fakeStory({ likeCount: 0 }));
+    likeRepo.removeLike.mockResolvedValue(0);
+
+    const res = await request(app).delete(`/api/v1/stories/${STORY_ID}/like`).set(AUTH);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.liked).toBe(false);
+    expect(res.body.data.likeCount).toBe(0);
+    expect(repo.adjustLikeCount).not.toHaveBeenCalled();
+    expect(bus.emitStoryUnliked).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 for an expired story', async () => {
+    repo.findActiveById.mockResolvedValue(null);
+
+    const res = await request(app).delete(`/api/v1/stories/${STORY_ID}/like`).set(AUTH);
+
+    expect(res.status).toBe(404);
   });
 });

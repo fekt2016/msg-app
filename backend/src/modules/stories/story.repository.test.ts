@@ -10,6 +10,7 @@ vi.mock('./story.model.js', () => ({
     findById: vi.fn(),
     findOne: vi.fn(),
     findByIdAndUpdate: vi.fn(),
+    findOneAndUpdate: vi.fn(),
     deleteOne: vi.fn(),
     aggregate: vi.fn(),
   },
@@ -105,5 +106,33 @@ describe('storyRepository views', () => {
 
     viewModel.exists.mockResolvedValue(null);
     expect(await storyRepository.hasViewed('s1', 'u2')).toBe(false);
+  });
+});
+
+describe('storyRepository likes', () => {
+  it('increments the like count unconditionally', async () => {
+    storyModel.findByIdAndUpdate.mockReturnValue({ lean: () => Promise.resolve({ likeCount: 4 }) });
+
+    const result = await storyRepository.adjustLikeCount('s1', 1);
+
+    expect(storyModel.findByIdAndUpdate).toHaveBeenCalledWith(
+      's1',
+      { $inc: { likeCount: 1 } },
+      { new: true },
+    );
+    expect(result).toEqual({ likeCount: 4 });
+  });
+
+  it('decrements the like count only when it is already ≥ 1 (guarded, atomic)', async () => {
+    storyModel.findOneAndUpdate.mockReturnValue({ lean: () => Promise.resolve({ likeCount: 2 }) });
+
+    const result = await storyRepository.adjustLikeCount('s1', -1);
+
+    expect(storyModel.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: 's1', likeCount: { $gte: 1 } },
+      { $inc: { likeCount: -1 } },
+      { new: true },
+    );
+    expect(result).toEqual({ likeCount: 2 });
   });
 });

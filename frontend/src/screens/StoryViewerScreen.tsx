@@ -2,12 +2,25 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useVideoPlayer, VideoView } from 'expo-video';
+import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useQueryClient } from '@tanstack/react-query';
-import { useStoryFeed, useMarkStoryViewed, useStoryViewers, storyKeys } from '../hooks/useStories';
-import { realtimeClient, REALTIME_EVENTS, type StoryViewedEvent } from '../realtime/client';
+import {
+  useStoryFeed,
+  useMarkStoryViewed,
+  useStoryViewers,
+  useLikeStory,
+  useUnlikeStory,
+  storyKeys,
+} from '../hooks/useStories';
+import {
+  realtimeClient,
+  REALTIME_EVENTS,
+  type StoryViewedEvent,
+  type StoryLikeEvent,
+} from '../realtime/client';
 import { useAuth } from '../auth/AuthContext';
-import type { Story } from '../api/stories';
+import type { Story, StoryFeedItem, Paginated } from '../api/stories';
 import type { AppStackParamList } from '../navigation/types';
 import { colors, spacing } from '../theme/tokens';
 
@@ -37,6 +50,8 @@ export function StoryViewerScreen({ route, navigation }: Props) {
 
   const markViewed = useMarkStoryViewed(story?.id ?? '');
   const { data: viewers } = useStoryViewers(story?.id ?? '', { enabled: isOwn });
+  const likeStory = useLikeStory();
+  const unlikeStory = useUnlikeStory();
 
   // Mark each story as viewed as the viewer reaches it. The backend is
   // idempotent — re-views are a 200 no-op — so calling per open is safe.
@@ -88,6 +103,38 @@ export function StoryViewerScreen({ route, navigation }: Props) {
       socket.off(REALTIME_EVENTS.STORY_VIEWED, handleViewed);
     };
   }, [isOwn, story?.id, user?.id, queryClient]);
+
+  // Live like-count for the author's own open viewer — `story:liked` /
+  // `story:unliked` carry the authoritative server count, so patching the feed
+  // cache is exact (no client-side guessing, no refetch race).
+  useEffect(() => {
+    if (!isOwn || !story) return;
+    const socket = realtimeClient.connect();
+    const handleLike = (payload: StoryLikeEvent) => {
+      if (payload.storyId !== story.id) return;
+      queryClient.setQueriesData<Paginated<StoryFeedItem>>(
+        { queryKey: storyKeys.feed() },
+        (feed) => {
+          if (!feed) return feed;
+          return {
+            ...feed,
+            items: feed.items.map((group) => ({
+              ...group,
+              stories: group.stories.map((s) =>
+                s.id === story.id ? { ...s, likeCount: payload.likeCount } : s,
+              ),
+            })),
+          };
+        },
+      );
+    };
+    socket.on(REALTIME_EVENTS.STORY_LIKED, handleLike);
+    socket.on(REALTIME_EVENTS.STORY_UNLIKED, handleLike);
+    return () => {
+      socket.off(REALTIME_EVENTS.STORY_LIKED, handleLike);
+      socket.off(REALTIME_EVENTS.STORY_UNLIKED, handleLike);
+    };
+  }, [isOwn, story?.id, queryClient]);
 
   const goPrevious = useCallback(() => {
     setIndex((current) => (current <= 0 ? current : current - 1));
@@ -164,6 +211,29 @@ export function StoryViewerScreen({ route, navigation }: Props) {
           <Text style={styles.caption}>{story.caption}</Text>
         </View>
       ) : null}
+
+      <View style={styles.likeOverlay}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={story.hasLiked ? 'Unlike story' : 'Like story'}
+          accessibilityState={{ selected: story.hasLiked }}
+          onPress={() => {
+            if (story.hasLiked) {
+              unlikeStory.mutate(story.id);
+            } else {
+              likeStory.mutate(story.id);
+            }
+          }}
+          style={styles.likeButton}
+        >
+          <Ionicons
+            name={story.hasLiked ? 'heart' : 'heart-outline'}
+            size={30}
+            color={story.hasLiked ? colors.terracotta : colors.savanna}
+          />
+          {story.likeCount > 0 ? <Text style={styles.likeCount}>{story.likeCount}</Text> : null}
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -265,6 +335,23 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textShadowColor: colors.baobabDeep,
     textShadowRadius: 6,
+  },
+  likeOverlay: {
+    position: 'absolute',
+    right: spacing.md,
+    bottom: spacing.xxl,
+  },
+  likeButton: {
+    alignItems: 'center',
+    gap: spacing.xs,
+    padding: spacing.sm,
+    backgroundColor: 'rgba(10, 18, 14, 0.45)',
+    borderRadius: 999,
+  },
+  likeCount: {
+    color: colors.savanna,
+    fontSize: 13,
+    fontWeight: '700',
   },
   gone: {
     flex: 1,

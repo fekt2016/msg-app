@@ -118,6 +118,24 @@ export const storyRepository = {
     return StoryModel.findByIdAndUpdate(storyId, { $inc: { viewCount: 1 } }, { new: true }).lean();
   },
 
+  async adjustLikeCount(storyId: string, delta: number): Promise<StoryDoc | null> {
+    // Atomic guarded decrement: only decrement when the count is already ≥1 so a
+    // raced unlike can never drive it negative (the authoritative like row is
+    // the source of truth). Increments are unconditional.
+    if (delta < 0) {
+      return StoryModel.findOneAndUpdate(
+        { _id: storyId, likeCount: { $gte: 1 } },
+        { $inc: { likeCount: delta } },
+        { new: true },
+      ).lean();
+    }
+    return StoryModel.findByIdAndUpdate(
+      storyId,
+      { $inc: { likeCount: delta } },
+      { new: true },
+    ).lean();
+  },
+
   async addView(input: {
     storyId: string;
     viewerId: string;

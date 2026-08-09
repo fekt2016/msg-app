@@ -34,6 +34,8 @@ storyRouter.use(authenticate);
  *         expiresAt: { type: string, format: date-time }
  *         createdAt: { type: string, format: date-time }
  *         hasViewed: { type: boolean }
+ *         hasLiked: { type: boolean }
+ *         likeCount: { type: integer }
  *         viewCount: { type: integer }
  *     StoryFeedItem:
  *       type: object
@@ -217,6 +219,72 @@ storyRouter.post(
   '/:storyId/views',
   validate({ params: storyIdParamSchema }),
   asyncHandler(storyController.markViewed),
+);
+
+/**
+ * @swagger
+ * /stories/{storyId}/like:
+ *   put:
+ *     summary: Like a story (idempotent)
+ *     tags: [Stories]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - { name: storyId, in: path, required: true, schema: { type: string } }
+ *     responses:
+ *       200:
+ *         description: Liked (or already liked)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     liked: { type: boolean }
+ *                     likeCount: { type: integer }
+ *       404:
+ *         description: Story not found or expired
+ */
+storyRouter.put(
+  '/:storyId/like',
+  validate({ params: storyIdParamSchema }),
+  asyncHandler(storyController.like),
+);
+
+/**
+ * @swagger
+ * /stories/{storyId}/like:
+ *   delete:
+ *     summary: Unlike a story (idempotent)
+ *     tags: [Stories]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - { name: storyId, in: path, required: true, schema: { type: string } }
+ *     responses:
+ *       200:
+ *         description: Unliked (or already unliked)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     liked: { type: boolean }
+ *                     likeCount: { type: integer }
+ *       404:
+ *         description: Story not found or expired
+ */
+storyRouter.delete(
+  '/:storyId/like',
+  validate({ params: storyIdParamSchema }),
+  asyncHandler(storyController.unlike),
 );
 
 /**

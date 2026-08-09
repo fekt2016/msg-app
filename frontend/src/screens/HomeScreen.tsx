@@ -18,7 +18,13 @@ import type { CompositeScreenProps } from '@react-navigation/native';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useQueryClient } from '@tanstack/react-query';
-import { useStoryFeed, useMarkStoryViewedInFeed, storyKeys } from '../hooks/useStories';
+import {
+  useStoryFeed,
+  useMarkStoryViewedInFeed,
+  useLikeStory,
+  useUnlikeStory,
+  storyKeys,
+} from '../hooks/useStories';
 import { realtimeClient, REALTIME_EVENTS } from '../realtime/client';
 import type { Story } from '../api/stories';
 import type { AppStackParamList, MainTabsParamList } from '../navigation/types';
@@ -69,18 +75,37 @@ export function HomeScreen({ navigation }: Props) {
   // One shared mute toggle for the whole feed (TikTok-style). Muted by default
   // for reliable autoplay; the rail's speaker icon flips it.
   const [muted, setMuted] = useState(true);
-  const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
   const viewedRef = useRef<Set<string>>(new Set());
+  const likeStory = useLikeStory();
+  const unlikeStory = useUnlikeStory();
 
-  // Flatten every author's active stories into one cross-author list and
-  // shuffle it (TikTok-style random order). Re-shuffles only when the feed data
-  // actually changes, not on every render.
-  const stories = useMemo<FeedStory[]>(() => {
-    const flat = (feed?.items ?? []).flatMap((item) =>
-      item.stories.map((story) => ({ story, author: item.author })),
-    );
-    return shuffle(flat);
-  }, [feed]);
+  // Flatten every author's active stories into one cross-author list. `byId`
+  // holds the current (post-optimistic-patch) story data.
+  const flat = useMemo<FeedStory[]>(
+    () =>
+      (feed?.items ?? []).flatMap((item) =>
+        item.stories.map((story) => ({ story, author: item.author })),
+      ),
+    [feed],
+  );
+  const byId = useMemo(() => new Map(flat.map((f) => [f.story.id, f])), [flat]);
+
+  // Stable shuffled order (TikTok-style random): keyed on the SET of story ids,
+  // so a like patch (same ids, changed likeCount/hasLiked) never reshuffles the
+  // feed — only adding/removing stories does.
+  const idSetKey = useMemo(
+    () =>
+      flat
+        .map((f) => f.story.id)
+        .sort()
+        .join(','),
+    [flat],
+  );
+  const orderedIds = useMemo(() => (idSetKey ? shuffle(idSetKey.split(',')) : []), [idSetKey]);
+  const stories = useMemo(
+    () => orderedIds.map((id) => byId.get(id)).filter((s): s is FeedStory => Boolean(s)),
+    [orderedIds, byId],
+  );
 
   // Keep the feed fresh: a new/deleted story anywhere refetches the feed.
   useEffect(() => {
@@ -110,14 +135,18 @@ export function HomeScreen({ navigation }: Props) {
   // without waiting for the initial onViewableItemsChanged to fire.
   const activeStoryId = activeId ?? stories[0]?.story.id ?? null;
 
-  const toggleLike = useCallback((id: string) => {
-    setLikedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
+  const toggleLike = useCallback(
+    (story: Story) => {
+      // Optimistic like/unlike — the mutation patches the feed cache
+      // (hasLiked + likeCount) so the heart and count update immediately.
+      if (story.hasLiked) {
+        unlikeStory.mutate(story.id);
+      } else {
+        likeStory.mutate(story.id);
+      }
+    },
+    [likeStory, unlikeStory],
+  );
 
   const handleShare = useCallback((story: Story) => {
     void Share.share({
@@ -132,13 +161,12 @@ export function HomeScreen({ navigation }: Props) {
         height={containerHeight}
         isActive={item.story.id === activeStoryId}
         muted={muted}
-        liked={likedIds.has(item.story.id)}
-        onToggleLike={() => toggleLike(item.story.id)}
+        onToggleLike={() => toggleLike(item.story)}
         onToggleMute={() => setMuted((m) => !m)}
         onShare={() => handleShare(item.story)}
       />
     ),
-    [containerHeight, activeStoryId, muted, likedIds, toggleLike, handleShare],
+    [containerHeight, activeStoryId, muted, toggleLike, handleShare],
   );
 
   return (
@@ -222,7 +250,6 @@ function StoryPage({
   height,
   isActive,
   muted,
-  liked,
   onToggleLike,
   onToggleMute,
   onShare,
@@ -231,7 +258,6 @@ function StoryPage({
   height: number;
   isActive: boolean;
   muted: boolean;
-  liked: boolean;
   onToggleLike: () => void;
   onToggleMute: () => void;
   onShare: () => void;
@@ -248,19 +274,22 @@ function StoryPage({
       <View style={styles.scrim} pointerEvents="none" />
 
       <View style={styles.actionRail}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={liked ? 'Unlike story' : 'Like story'}
-          onPress={onToggleLike}
-          hitSlop={8}
-          style={styles.railButton}
-        >
-          <Ionicons
-            name={liked ? 'heart' : 'heart-outline'}
-            size={32}
-            color={liked ? colors.terracotta : colors.savanna}
-          />
-        </Pressable>
+        <View style={styles.railItem}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={story.hasLiked ? 'Unlike story' : 'Like story'}
+            onPress={onToggleLike}
+            hitSlop={8}
+            style={styles.railButton}
+          >
+            <Ionicons
+              name={story.hasLiked ? 'heart' : 'heart-outline'}
+              size={32}
+              color={story.hasLiked ? colors.terracotta : colors.savanna}
+            />
+          </Pressable>
+          {story.likeCount > 0 ? <Text style={styles.railCount}>{story.likeCount}</Text> : null}
+        </View>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Share story"
@@ -372,6 +401,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.lg,
   },
+  railItem: {
+    alignItems: 'center',
+    gap: 4,
+  },
   railButton: {
     width: 48,
     height: 48,
@@ -379,6 +412,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(15, 27, 22, 0.35)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  railCount: {
+    color: colors.savanna,
+    fontSize: 13,
+    fontWeight: '700',
+    textShadowColor: colors.baobabDeep,
+    textShadowRadius: 4,
   },
   authorRow: {
     flexDirection: 'row',
