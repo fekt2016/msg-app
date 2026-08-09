@@ -146,6 +146,24 @@ describe('mediaStorage (dev fallback)', () => {
     expect(asset.url).toBe('');
   });
 
+  it('returns a valid non-empty story media URL in dev (Story.media.url is required)', async () => {
+    const video = await mediaStorage.uploadStoryMedia({
+      buffer: Buffer.from('x'),
+      mimetype: 'video/mp4',
+      originalname: 's.mp4',
+    });
+    expect(video.url).not.toBe('');
+    expect(video.resourceType).toBe('VIDEO');
+
+    const image = await mediaStorage.uploadStoryMedia({
+      buffer: Buffer.from('x'),
+      mimetype: 'image/png',
+      originalname: 's.png',
+    });
+    expect(image.url).not.toBe('');
+    expect(image.resourceType).toBe('IMAGE');
+  });
+
   it('does not delete when Cloudinary is not configured', async () => {
     await expect(mediaStorage.deleteByPublicId('dev-123')).resolves.toBeUndefined();
   });
