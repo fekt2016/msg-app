@@ -57,3 +57,12 @@ jest.mock('@expo/vector-icons', () => {
     Feather: stub,
   };
 });
+
+// expo-video renders a native-backed <VideoView> and creates a native player.
+// In Jest it has no native module, so stub the hook + view (the StoryViewer's
+// video path is asserted via the surrounding UI, not actual playback).
+jest.mock('expo-video', () => ({
+  __esModule: true,
+  useVideoPlayer: jest.fn(() => ({ play: jest.fn(), pause: jest.fn(), loop: false })),
+  VideoView: () => null,
+}));

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { CompositeScreenProps } from '@react-navigation/native';
@@ -6,6 +7,12 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useAuth } from '../auth/AuthContext';
 import { useRealtime } from '../realtime/RealtimeProvider';
 import { useChatUsers } from '../hooks/useChatUsers';
+import { useMatchContacts } from '../hooks/useMatchContacts';
+import {
+  requestContactsPermission,
+  readContactPhones,
+  extractPhoneNumbers,
+} from '../contacts/contacts';
 import type { SafeUser } from '../api/auth';
 import type { AppStackParamList, MainTabsParamList } from '../navigation/types';
 import { colors, spacing, radius } from '../theme/tokens';
@@ -15,12 +22,43 @@ type Props = CompositeScreenProps<
   NativeStackScreenProps<AppStackParamList>
 >;
 
+type ContactsState =
+  | { status: 'idle' }
+  | { status: 'denied' }
+  | { status: 'loading' }
+  | { status: 'matched'; matches: SafeUser[] }
+  | { status: 'error'; message: string };
+
 export function ChatsScreen({ navigation }: Props) {
   const { user } = useAuth();
   const { connected, onlineUserIds } = useRealtime();
   const { data: chatUsers, isLoading, isError, refetch } = useChatUsers();
+  const matchContacts = useMatchContacts();
+  const [contactsState, setContactsState] = useState<ContactsState>({ status: 'idle' });
 
-  const peers = (chatUsers ?? []).filter((item) => item.id !== user?.id);
+  async function handleFindFromContacts() {
+    if (matchContacts.isPending) return;
+    const granted = await requestContactsPermission();
+    if (!granted) {
+      setContactsState({ status: 'denied' });
+      return;
+    }
+    setContactsState({ status: 'loading' });
+    try {
+      const contacts = await readContactPhones();
+      const matches = await matchContacts.mutateAsync(extractPhoneNumbers(contacts));
+      setContactsState({ status: 'matched', matches });
+    } catch (err) {
+      setContactsState({
+        status: 'error',
+        message: err instanceof Error ? err.message : 'Could not match your contacts.',
+      });
+    }
+  }
+
+  const contactMatches = contactsState.status === 'matched' ? contactsState.matches : [];
+  const allPeers = (chatUsers ?? []).filter((item) => item.id !== user?.id);
+  const peers = contactMatches.length > 0 ? contactMatches : allPeers;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -39,6 +77,31 @@ export function ChatsScreen({ navigation }: Props) {
           {connected ? `Connected · ${onlineUserIds.length} online` : 'Connecting…'}
         </Text>
       </View>
+
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => void handleFindFromContacts()}
+        style={styles.contactsButton}
+        disabled={matchContacts.isPending}
+      >
+        <Text style={styles.contactsButtonText}>
+          {matchContacts.isPending ? 'Matching your contacts…' : 'Find friends from contacts'}
+        </Text>
+      </Pressable>
+
+      {contactsState.status === 'denied' && (
+        <Text style={styles.contactsHint}>
+          Contacts access was denied. Allow it in your device settings to find friends.
+        </Text>
+      )}
+      {contactsState.status === 'error' && (
+        <Text style={styles.contactsHint}>{contactsState.message}</Text>
+      )}
+      {contactsState.status === 'matched' && contactMatches.length === 0 && (
+        <Text style={styles.contactsHint}>
+          No friends from your contacts are on Eaz Community yet.
+        </Text>
+      )}
 
       {isLoading ? (
         <Text style={styles.muted}>Loading chats…</Text>
@@ -66,7 +129,9 @@ export function ChatsScreen({ navigation }: Props) {
           contentContainerStyle={styles.listContent}
         />
       ) : (
-        <Text style={styles.muted}>No chats yet. Find someone to message on Home.</Text>
+        <Text style={styles.muted}>
+          No people to chat with yet. Tap “Find friends from contacts” above.
+        </Text>
       )}
     </SafeAreaView>
   );
@@ -147,5 +212,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
+  },
+  contactsButton: {
+    marginTop: spacing.md,
+    marginHorizontal: spacing.lg,
+    backgroundColor: colors.inputSurface,
+    borderWidth: 1,
+    borderColor: colors.kenteGold,
+    borderRadius: radius.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    alignSelf: 'flex-start',
+  },
+  contactsButtonText: {
+    color: colors.kenteGold,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  contactsHint: {
+    color: colors.savannaMuted,
+    fontSize: 13,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
   },
 });

@@ -31,7 +31,19 @@ import {
   isSupportedImage,
   mediaStorage,
   sniffImageMimeType,
+  sniffVideoMimeType,
+  sniffStoryMedia,
 } from './mediaStorage.js';
+
+function ftyp(brand: string): Buffer {
+  return Buffer.concat([
+    Buffer.from([0x00, 0x00, 0x00, 0x18]),
+    Buffer.from('ftyp', 'ascii'),
+    Buffer.from(brand, 'ascii'),
+    Buffer.alloc(12),
+  ]);
+}
+const WEBM_HEADER = Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x00, 0x00]);
 
 const VALID_JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
 const VALID_PNG = Buffer.from([
@@ -60,6 +72,37 @@ describe('isSupportedImage', () => {
   it('rejects other types', () => {
     expect(isSupportedImage('text/plain')).toBe(false);
     expect(isSupportedImage('image/gif')).toBe(false);
+  });
+});
+
+describe('sniffVideoMimeType', () => {
+  it('accepts common MP4 brands (isom, mp41, mp42, avc1, M4V )', () => {
+    for (const brand of ['isom', 'mp41', 'mp42', 'avc1', 'M4V ']) {
+      expect(sniffVideoMimeType(ftyp(brand))).toBe('video/mp4');
+    }
+  });
+
+  it('accepts QuickTime (qt  ) and WebM (EBML)', () => {
+    expect(sniffVideoMimeType(ftyp('qt  '))).toBe('video/quicktime');
+    expect(sniffVideoMimeType(WEBM_HEADER)).toBe('video/webm');
+  });
+
+  it('rejects a still-image ISO-BMFF brand (heic) — fails closed, not video', () => {
+    expect(sniffVideoMimeType(ftyp('heic'))).toBeNull();
+    expect(sniffVideoMimeType(ftyp('avif'))).toBeNull();
+  });
+
+  it('rejects a spoofed/non-video payload', () => {
+    expect(sniffVideoMimeType(Buffer.from('not a video at all, honest'))).toBeNull();
+    expect(sniffVideoMimeType(Buffer.alloc(0))).toBeNull();
+  });
+});
+
+describe('sniffStoryMedia', () => {
+  it('classifies images and videos, and rejects everything else', () => {
+    expect(sniffStoryMedia(VALID_PNG)?.resourceType).toBe('IMAGE');
+    expect(sniffStoryMedia(ftyp('mp41'))?.resourceType).toBe('VIDEO');
+    expect(sniffStoryMedia(Buffer.from('nope'))).toBeNull();
   });
 });
 

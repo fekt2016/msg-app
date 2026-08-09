@@ -1,19 +1,24 @@
-import { useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  Image,
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+  type ViewToken,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import type { CompositeScreenProps } from '@react-navigation/native';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useAuth } from '../auth/AuthContext';
-import { useRealtime } from '../realtime/RealtimeProvider';
-import { useChatUsers } from '../hooks/useChatUsers';
-import { useMatchContacts } from '../hooks/useMatchContacts';
-import {
-  requestContactsPermission,
-  readContactPhones,
-  extractPhoneNumbers,
-} from '../contacts/contacts';
-import type { SafeUser } from '../api/auth';
+import { useQueryClient } from '@tanstack/react-query';
+import { useStoryFeed, useMarkStoryViewedInFeed, storyKeys } from '../hooks/useStories';
+import { realtimeClient, REALTIME_EVENTS } from '../realtime/client';
+import type { Story } from '../api/stories';
 import type { AppStackParamList, MainTabsParamList } from '../navigation/types';
 import { colors, spacing, radius } from '../theme/tokens';
 
@@ -22,322 +27,353 @@ type Props = CompositeScreenProps<
   NativeStackScreenProps<AppStackParamList>
 >;
 
-type ContactsState =
-  | { status: 'idle' }
-  | { status: 'denied' }
-  | { status: 'loading' }
-  | { status: 'matched'; matches: SafeUser[] }
-  | { status: 'error'; message: string };
+type FeedStory = {
+  story: Story;
+  author: { id: string; displayName: string; avatarUrl: string | null };
+};
+
+/** Fisher–Yates shuffle (returns a new array) so the feed order is random. */
+function shuffle<T>(input: T[]): T[] {
+  const out = [...input];
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+function timeAgo(iso: string): string {
+  const minutes = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
+const VIEWABILITY = { itemVisiblePercentThreshold: 60 };
 
 export function HomeScreen({ navigation }: Props) {
-  const { user } = useAuth();
-  const { connected, onlineUserIds } = useRealtime();
-  const { data: chatUsers, isLoading, isError, refetch } = useChatUsers();
-  const matchContacts = useMatchContacts();
-  const [contactsState, setContactsState] = useState<ContactsState>({ status: 'idle' });
+  const queryClient = useQueryClient();
+  const window = useWindowDimensions();
+  const { data: feed, isLoading, isError, refetch } = useStoryFeed();
+  const markViewed = useMarkStoryViewedInFeed();
 
-  async function handleFindFromContacts() {
-    if (matchContacts.isPending) return;
+  // Measured height paints exactly to the tab area; the window height is the
+  // fallback so the first frame isn't blank before onLayout fires.
+  const [measuredHeight, setMeasuredHeight] = useState(0);
+  const containerHeight = measuredHeight || window.height;
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const viewedRef = useRef<Set<string>>(new Set());
 
-    const granted = await requestContactsPermission();
-    if (!granted) {
-      setContactsState({ status: 'denied' });
-      return;
+  // Flatten every author's active stories into one cross-author list and
+  // shuffle it (TikTok-style random order). Re-shuffles only when the feed data
+  // actually changes, not on every render.
+  const stories = useMemo<FeedStory[]>(() => {
+    const flat = (feed?.items ?? []).flatMap((item) =>
+      item.stories.map((story) => ({ story, author: item.author })),
+    );
+    return shuffle(flat);
+  }, [feed]);
+
+  // Keep the feed fresh: a new/deleted story anywhere refetches the feed.
+  useEffect(() => {
+    const socket = realtimeClient.connect();
+    const refresh = () => void queryClient.invalidateQueries({ queryKey: storyKeys.feed() });
+    socket.on(REALTIME_EVENTS.STORY_NEW, refresh);
+    socket.on(REALTIME_EVENTS.STORY_DELETED, refresh);
+    return () => {
+      socket.off(REALTIME_EVENTS.STORY_NEW, refresh);
+      socket.off(REALTIME_EVENTS.STORY_DELETED, refresh);
+    };
+  }, [queryClient]);
+
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
+    const first = viewableItems[0]?.item as FeedStory | undefined;
+    if (!first) return;
+    const id = first.story.id;
+    setActiveId(id);
+    // Mark viewed once per story per session (server is idempotent regardless).
+    if (!first.story.hasViewed && !viewedRef.current.has(id)) {
+      viewedRef.current.add(id);
+      markViewed.mutate(id);
     }
+  }).current;
 
-    setContactsState({ status: 'loading' });
-    try {
-      const contacts = await readContactPhones();
-      const matches = await matchContacts.mutateAsync(extractPhoneNumbers(contacts));
-      setContactsState({ status: 'matched', matches });
-    } catch (err) {
-      setContactsState({
-        status: 'error',
-        message: err instanceof Error ? err.message : 'Could not match your contacts.',
-      });
-    }
-  }
-
-  const contactMatches = contactsState.status === 'matched' ? contactsState.matches : [];
-
-  const listUsers = contactMatches.length > 0 ? contactMatches : chatUsers;
+  const renderItem = useCallback(
+    ({ item }: { item: FeedStory }) => (
+      <StoryPage item={item} height={containerHeight} isActive={item.story.id === activeId} />
+    ),
+    [containerHeight, activeId],
+  );
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      <View style={styles.content}>
-        <Text style={styles.eyebrow}>E A Z C O M M U N I T Y</Text>
-        <Text style={styles.title}>Hello, {user?.displayName ?? 'friend'}.</Text>
-        <Text style={styles.subtitle}>Start a chat with someone in your community.</Text>
-
-        <View style={styles.realtimeRow} accessibilityLabel="Realtime status">
-          <View
-            style={[
-              styles.statusDot,
-              { backgroundColor: connected ? colors.kenteGold : colors.terracotta },
-            ]}
-          />
-          <Text style={styles.realtimeText}>
-            {connected ? `Connected · ${onlineUserIds.length} online` : 'Connecting…'}
-          </Text>
+    <View
+      testID="home-feed"
+      style={styles.safe}
+      onLayout={(e) => setMeasuredHeight(e.nativeEvent.layout.height)}
+    >
+      {containerHeight > 0 && stories.length > 0 ? (
+        <FlatList
+          data={stories}
+          keyExtractor={(item) => item.story.id}
+          renderItem={renderItem}
+          pagingEnabled
+          showsVerticalScrollIndicator={false}
+          snapToInterval={containerHeight}
+          decelerationRate="fast"
+          getItemLayout={(_, index) => ({
+            length: containerHeight,
+            offset: containerHeight * index,
+            index,
+          })}
+          onViewableItemsChanged={onViewableItemsChanged}
+          viewabilityConfig={VIEWABILITY}
+          windowSize={3}
+        />
+      ) : (
+        <View style={[styles.stateWrap, { height: containerHeight || undefined }]}>
+          {isLoading ? (
+            <ActivityIndicator color={colors.kenteGold} />
+          ) : isError ? (
+            <Pressable accessibilityRole="button" onPress={() => void refetch()}>
+              <Text style={styles.stateText}>Could not load stories. Tap to retry.</Text>
+            </Pressable>
+          ) : (
+            <>
+              <Text style={styles.emptyTitle}>No stories yet</Text>
+              <Text style={styles.stateText}>Be the first to share a moment.</Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Create your first story"
+                onPress={() => navigation.navigate('CreateStory')}
+                style={styles.emptyCta}
+              >
+                <Text style={styles.emptyCtaText}>＋ Add your story</Text>
+              </Pressable>
+            </>
+          )}
         </View>
+      )}
 
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => void handleFindFromContacts()}
-          style={styles.contactsButton}
-          disabled={matchContacts.isPending}
-        >
-          <Text style={styles.contactsButtonText}>
-            {matchContacts.isPending ? 'Matching your contacts…' : 'Find friends from contacts'}
-          </Text>
-        </Pressable>
-
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Open channels"
-          onPress={() => navigation.navigate('Channels')}
-          style={styles.channelsCard}
-        >
-          <View style={styles.channelsIcon}>
-            <Text style={styles.channelsIconText}>◆</Text>
-          </View>
-          <View style={styles.channelsBody}>
-            <Text style={styles.channelsTitle}>Channels</Text>
-            <Text style={styles.channelsSub}>Follow community broadcasts and announcements</Text>
-          </View>
-          <Text style={styles.channelsArrow}>›</Text>
-        </Pressable>
-
-        {contactsState.status === 'denied' && (
-          <Text style={styles.contactsHint}>
-            Contacts access was denied. Allow it in your device settings to find friends.
-          </Text>
-        )}
-        {contactsState.status === 'error' && (
-          <Text style={styles.contactsHint}>{contactsState.message}</Text>
-        )}
-        {contactsState.status === 'matched' && contactMatches.length === 0 && (
-          <Text style={styles.contactsHint}>
-            No friends from your contacts are on Eaz Community yet.
-          </Text>
-        )}
-
-        <Text style={styles.sectionLabel}>People to chat with</Text>
-
-        {isLoading ? (
-          <Text style={styles.muted}>Loading users…</Text>
-        ) : isError ? (
-          <Pressable accessibilityRole="button" onPress={() => void refetch()}>
-            <Text style={styles.muted}>Could not load users. Tap to retry.</Text>
+      <SafeAreaView edges={['top']} style={styles.topBar} pointerEvents="box-none">
+        <Text style={styles.brand}>✦ Eaz</Text>
+        <View style={styles.topActions}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Add your story"
+            onPress={() => navigation.navigate('CreateStory')}
+            hitSlop={8}
+            style={styles.topButton}
+          >
+            <Text style={styles.topIcon}>＋</Text>
           </Pressable>
-        ) : listUsers && listUsers.length > 0 ? (
-          <FlatList
-            data={listUsers}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <ChatUserRow
-                user={item}
-                online={onlineUserIds.includes(item.id)}
-                onPress={() =>
-                  navigation.navigate('Chat', { userId: item.id, displayName: item.displayName })
-                }
-              />
-            )}
-            ItemSeparatorComponent={() => <View style={styles.separator} />}
-            contentContainerStyle={styles.listContent}
-          />
-        ) : (
-          <Text style={styles.muted}>No other users yet. Invite a friend to join.</Text>
-        )}
-      </View>
-    </SafeAreaView>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open channels"
+            onPress={() => navigation.navigate('Channels')}
+            hitSlop={8}
+            style={styles.topButton}
+          >
+            <Text style={styles.topIcon}>◆</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    </View>
   );
 }
 
-function ChatUserRow({
-  user,
-  online,
-  onPress,
+function StoryPage({
+  item,
+  height,
+  isActive,
 }: {
-  user: SafeUser;
-  online: boolean;
-  onPress: () => void;
+  item: FeedStory;
+  height: number;
+  isActive: boolean;
 }) {
+  const { story, author } = item;
   return (
-    <Pressable accessibilityRole="button" onPress={onPress} style={styles.userRow}>
-      <View style={styles.avatar}>
-        <Text style={styles.avatarText}>{user.displayName.charAt(0).toUpperCase()}</Text>
+    <View style={[styles.page, { height }]}>
+      {story.media.resourceType === 'VIDEO' ? (
+        <FeedVideo url={story.media.url} isActive={isActive} />
+      ) : (
+        <Image source={{ uri: story.media.url }} style={styles.media} resizeMode="cover" />
+      )}
+
+      <View style={styles.scrim} pointerEvents="none" />
+
+      <View style={styles.metaOverlay} pointerEvents="none">
+        <View style={styles.authorRow}>
+          <View style={styles.authorAvatar}>
+            {author.avatarUrl ? (
+              <Image source={{ uri: author.avatarUrl }} style={styles.authorAvatarImg} />
+            ) : (
+              <Text style={styles.authorInitial}>
+                {(author.displayName ?? '?').charAt(0).toUpperCase()}
+              </Text>
+            )}
+          </View>
+          <Text style={styles.authorName}>{author.displayName}</Text>
+          <Text style={styles.authorTime}>· {timeAgo(story.createdAt)}</Text>
+        </View>
+        {story.caption ? <Text style={styles.caption}>{story.caption}</Text> : null}
       </View>
-      <View style={styles.userInfo}>
-        <Text style={styles.userName}>{user.displayName}</Text>
-      </View>
-      <View
-        style={[
-          styles.onlineDot,
-          { backgroundColor: online ? colors.kenteGold : colors.savannaMuted },
-        ]}
-      />
-    </Pressable>
+    </View>
+  );
+}
+
+function FeedVideo({ url, isActive }: { url: string; isActive: boolean }) {
+  const player = useVideoPlayer(url, (p) => {
+    p.loop = true;
+    p.muted = false;
+  });
+
+  useEffect(() => {
+    if (isActive) {
+      player.play();
+    } else {
+      player.pause();
+    }
+  }, [isActive, player]);
+
+  return (
+    <VideoView player={player} style={styles.media} contentFit="cover" nativeControls={false} />
   );
 }
 
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: colors.baobab,
+    backgroundColor: colors.baobabDeep,
   },
-  content: {
-    flex: 1,
+  page: {
+    width: '100%',
+    backgroundColor: colors.baobabDeep,
+  },
+  media: {
+    width: '100%',
+    height: '100%',
+  },
+  scrim: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '38%',
+    backgroundColor: 'rgba(15, 27, 22, 0.55)',
+  },
+  metaOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: spacing.xxl,
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.xxl,
+    gap: spacing.sm,
   },
-  eyebrow: {
-    color: colors.kenteGold,
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 3,
-  },
-  title: {
-    color: colors.savanna,
-    fontSize: 32,
-    lineHeight: 38,
-    fontWeight: '800',
-    marginTop: spacing.xs,
-  },
-  subtitle: {
-    color: colors.savannaMuted,
-    fontSize: 16,
-    lineHeight: 23,
-    marginTop: spacing.xs,
-  },
-  realtimeRow: {
+  authorRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    marginTop: spacing.lg,
   },
-  statusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  realtimeText: {
-    color: colors.savannaMuted,
-    fontSize: 14,
-  },
-  sectionLabel: {
-    color: colors.savanna,
-    fontSize: 13,
-    fontWeight: '700',
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-    marginTop: spacing.xl,
-    marginBottom: spacing.sm,
-  },
-  contactsButton: {
-    marginTop: spacing.md,
-    backgroundColor: colors.inputSurface,
-    borderWidth: 1,
-    borderColor: colors.kenteGold,
-    borderRadius: radius.md,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    alignSelf: 'flex-start',
-  },
-  contactsButtonText: {
-    color: colors.kenteGold,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  contactsHint: {
-    color: colors.savannaMuted,
-    fontSize: 13,
-    marginTop: spacing.sm,
-  },
-  channelsCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    marginTop: spacing.md,
-    backgroundColor: colors.inputSurface,
-    borderWidth: 1,
-    borderColor: colors.kenteGold,
-    borderRadius: radius.md,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md,
-  },
-  channelsIcon: {
-    width: 44,
-    height: 44,
+  authorAvatar: {
+    width: 36,
+    height: 36,
     borderRadius: radius.full,
-    backgroundColor: colors.baobabDeep,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  channelsIconText: {
-    color: colors.kenteGold,
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  channelsBody: {
-    flex: 1,
-    gap: 2,
-  },
-  channelsTitle: {
-    color: colors.savanna,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  channelsSub: {
-    color: colors.savannaMuted,
-    fontSize: 13,
-  },
-  channelsArrow: {
-    color: colors.kenteGold,
-    fontSize: 22,
-    fontWeight: '700',
-  },
-  listContent: {
-    gap: 0,
-  },
-  userRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
     backgroundColor: colors.kenteGold,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
-  avatarText: {
+  authorAvatarImg: {
+    width: '100%',
+    height: '100%',
+  },
+  authorInitial: {
     color: colors.baobabDeep,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  authorName: {
+    color: colors.savanna,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  authorTime: {
+    color: colors.savannaMuted,
+    fontSize: 14,
+  },
+  caption: {
+    color: colors.savanna,
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '600',
+    textShadowColor: colors.baobabDeep,
+    textShadowRadius: 6,
+  },
+  topBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm,
+  },
+  brand: {
+    color: colors.kenteGold,
+    fontSize: 18,
+    fontWeight: '800',
+    letterSpacing: 1,
+    textShadowColor: colors.baobabDeep,
+    textShadowRadius: 6,
+  },
+  topActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  topButton: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.full,
+    backgroundColor: 'rgba(15, 27, 22, 0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  topIcon: {
+    color: colors.kenteGold,
     fontSize: 18,
     fontWeight: '800',
   },
-  userInfo: {
+  stateWrap: {
     flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
   },
-  userName: {
+  emptyTitle: {
     color: colors.savanna,
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 20,
+    fontWeight: '800',
   },
-  onlineDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  separator: {
-    height: 1,
-    backgroundColor: colors.inputBorder,
-  },
-  muted: {
+  stateText: {
     color: colors.savannaMuted,
     fontSize: 14,
+    textAlign: 'center',
+  },
+  emptyCta: {
+    marginTop: spacing.md,
+    backgroundColor: colors.kenteGold,
+    borderRadius: radius.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
+  },
+  emptyCtaText: {
+    color: colors.baobabDeep,
+    fontSize: 15,
+    fontWeight: '800',
   },
 });

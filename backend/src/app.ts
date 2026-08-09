@@ -11,6 +11,7 @@ import userRouter from './modules/users/user.routes.js';
 import communityRouter from './modules/communities/community.routes.js';
 import { channelRouter } from './modules/channels/channel.routes.js';
 import { channelInviteRouter } from './modules/channels/channel.invite.routes.js';
+import { storyRouter } from './modules/stories/story.routes.js';
 import groupRouter from './modules/groups/group.routes.js';
 import messageRouter from './modules/messages/message.routes.js';
 import { e2eeRouter } from './modules/e2ee/e2ee.routes.js';
@@ -104,6 +105,26 @@ export function createApp(): Express {
   // Image uploads are a Cloudinary cost/spam vector too — same tighter tier.
   apiV1.post('/channels/:identifier/posts/:postId/images', postLimiter);
   apiV1.use('/channels', channelRouter);
+
+  const storyLimiter = rateLimit({
+    windowMs: env.STORY_RATE_LIMIT_WINDOW_MS,
+    max: env.STORY_RATE_LIMIT_MAX,
+    standardHeaders: true,
+    legacyHeaders: false,
+    store: buildRateLimitStore(env.STORY_RATE_LIMIT_WINDOW_MS),
+  });
+  const storyViewLimiter = rateLimit({
+    windowMs: env.STORY_VIEW_RATE_LIMIT_WINDOW_MS,
+    max: env.STORY_VIEW_RATE_LIMIT_MAX,
+    standardHeaders: true,
+    legacyHeaders: false,
+    store: buildRateLimitStore(env.STORY_VIEW_RATE_LIMIT_WINDOW_MS),
+  });
+  // Stories are media (Cloudinary cost) + a spam vector — tighter than general.
+  apiV1.post('/stories', storyLimiter);
+  // Mark-viewed fires as the feed scrolls — its own lighter (higher) tier.
+  apiV1.post('/stories/:storyId/views', storyViewLimiter);
+  apiV1.use('/stories', storyRouter);
   apiV1.use('/groups', groupRouter);
   apiV1.use('/messages', messageRouter);
   apiV1.use('/e2ee/recovery', recoveryBackupRouter);

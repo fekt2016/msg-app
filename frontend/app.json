@@ -36,7 +36,8 @@
         {
           "contactsPermission": "Allow Eaz Community to access your contacts so you can find friends to chat with."
         }
-      ]
+      ],
+      "expo-video"
     ]
   }
 }

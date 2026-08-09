@@ -40,6 +40,9 @@ export const REALTIME_EVENTS = {
   CHANNEL_SUBSCRIBER_LEFT: 'channel:subscriber:left',
   CHANNEL_SUBSCRIBER_ROLE: 'channel:subscriber:role',
   CHANNEL_DELETED: 'channel:deleted',
+  STORY_NEW: 'story:new',
+  STORY_DELETED: 'story:deleted',
+  STORY_VIEWED: 'story:viewed',
 } as const;
 
 export interface EncryptedMessageEvent {
@@ -157,6 +160,45 @@ export interface ChannelSubscriberEvent {
 /** A channel was soft-deleted — every subscriber is evicted and notified. */
 export interface ChannelDeletedEvent {
   channelId: string;
+  at: string;
+}
+
+/** The story shape carried by `story:new` (viewer-agnostic safe story). */
+export interface StoryPayload {
+  id: string;
+  authorId: string;
+  media: {
+    publicId: string;
+    url: string;
+    width?: number;
+    height?: number;
+    resourceType: 'IMAGE' | 'VIDEO';
+    durationMs?: number;
+  };
+  caption: string;
+  expiresAt: string;
+  createdAt: string;
+  hasViewed: boolean;
+  viewCount?: number;
+}
+
+/** A story published — broadcast globally so every feed can refresh. */
+export interface StoryNewEvent {
+  story: StoryPayload;
+  at: string;
+}
+
+/** A story hard-deleted — broadcast globally so feeds drop the ring item. */
+export interface StoryDeletedEvent {
+  storyId: string;
+  authorId: string;
+  at: string;
+}
+
+/** A story was viewed — targeted to the author's `user:{id}` room (live count). */
+export interface StoryViewedEvent {
+  storyId: string;
+  viewerId: string;
   at: string;
 }
 

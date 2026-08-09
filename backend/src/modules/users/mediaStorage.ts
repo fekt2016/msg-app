@@ -16,9 +16,19 @@ export interface PostImageAsset {
   height: number;
 }
 
+export interface StoryMediaAsset {
+  publicId: string;
+  url: string;
+  width?: number;
+  height?: number;
+  resourceType: 'IMAGE' | 'VIDEO';
+  durationMs?: number;
+}
+
 export interface MediaStorage {
   uploadAvatar(file: UploadableFile): Promise<AvatarAsset>;
   uploadPostImage(file: UploadableFile): Promise<PostImageAsset>;
+  uploadStoryMedia(file: UploadableFile): Promise<StoryMediaAsset>;
   deleteByPublicId(publicId: string): Promise<void>;
 }
 
@@ -70,6 +80,86 @@ export function sniffImageMimeType(buffer: Buffer): SupportedImageMimeType | nul
     if (MAGIC_BYTE_SIGNATURES[mimetype](buffer)) {
       return mimetype;
     }
+  }
+  return null;
+}
+
+export const SUPPORTED_VIDEO_MIME_TYPES = ['video/mp4', 'video/quicktime', 'video/webm'] as const;
+
+export type SupportedVideoMimeType = (typeof SUPPORTED_VIDEO_MIME_TYPES)[number];
+
+export function isSupportedVideoMime(mimetype: string): mimetype is SupportedVideoMimeType {
+  return (SUPPORTED_VIDEO_MIME_TYPES as readonly string[]).includes(mimetype);
+}
+
+/**
+ * ISO Base Media File Format (MP4/MOV) video major brands. An explicit allowlist
+ * (fail-closed — a `ftyp` box is still required) but broad enough to accept the
+ * brands real-world encoders emit. Deliberately EXCLUDES image/audio `ftyp`
+ * brands (`heic`, `mif1`, `avif`, `M4A `) so a still-image or audio container in
+ * an ISO-BMFF wrapper is never accepted as video.
+ */
+const MP4_VIDEO_BRANDS = new Set([
+  'isom',
+  'iso2',
+  'iso4',
+  'iso5',
+  'iso6',
+  'mp41',
+  'mp42',
+  'mp71',
+  'avc1',
+  'mmp4',
+  'M4V ',
+  'dash',
+  'MSNV',
+  '3gp4',
+  '3gp5',
+]);
+
+/**
+ * Detects the actual video type from the file's magic bytes, ignoring the
+ * client-supplied `Content-Type`. Returns `null` when the bytes don't match any
+ * supported signature (including a spoofed header on a non-video payload). The
+ * authoritative type check for story media; `Content-Type` is never trusted
+ * alone (CLAUDE.md §11).
+ */
+export function sniffVideoMimeType(buffer: Buffer): SupportedVideoMimeType | null {
+  // WebM (and Matroska) share the EBML header. Cloudinary is authoritative on
+  // the stored resource type, so treating a rare MKV as webm here is harmless.
+  if (
+    buffer.length >= 4 &&
+    buffer[0] === 0x1a &&
+    buffer[1] === 0x45 &&
+    buffer[2] === 0xdf &&
+    buffer[3] === 0xa3
+  ) {
+    return 'video/webm';
+  }
+  // ISO-BMFF: require the `ftyp` box (fail-closed), then a known video brand.
+  if (buffer.length >= 12 && buffer.toString('ascii', 4, 8) === 'ftyp') {
+    const brand = buffer.toString('ascii', 8, 12);
+    if (brand === 'qt  ') return 'video/quicktime';
+    if (MP4_VIDEO_BRANDS.has(brand)) return 'video/mp4';
+  }
+  return null;
+}
+
+/**
+ * Detects whether a buffer is a supported image or video, returning the
+ * server-detected media resource type. The authoritative gate for story media.
+ */
+export function sniffStoryMedia(buffer: Buffer): {
+  resourceType: 'IMAGE' | 'VIDEO';
+  mimetype: SupportedImageMimeType | SupportedVideoMimeType;
+} | null {
+  const image = sniffImageMimeType(buffer);
+  if (image) {
+    return { resourceType: 'IMAGE', mimetype: image };
+  }
+  const video = sniffVideoMimeType(buffer);
+  if (video) {
+    return { resourceType: 'VIDEO', mimetype: video };
   }
   return null;
 }
@@ -202,6 +292,80 @@ class CloudinaryMediaStorage implements MediaStorage {
     return asset;
   }
 
+  /**
+   * Uploads story media (image or video) to Cloudinary. `resource_type: 'auto'`
+   * lets Cloudinary detect image vs. video; the width cap keeps delivery light
+   * and preserves aspect ratio. Folder `eaz-community/stories`.
+   */
+  async uploadStoryMedia(file: UploadableFile): Promise<StoryMediaAsset> {
+    if (!env.CLOUDINARY_CLOUD_NAME || !env.CLOUDINARY_API_KEY || !env.CLOUDINARY_API_SECRET) {
+      throw new AppError(
+        500,
+        'STORAGE_PROVIDER_NOT_CONFIGURED',
+        'Cloudinary is not configured. Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET.',
+      );
+    }
+
+    const { v2: cloudinary } = await import('cloudinary');
+    cloudinary.config({
+      cloud_name: env.CLOUDINARY_CLOUD_NAME,
+      api_key: env.CLOUDINARY_API_KEY,
+      api_secret: env.CLOUDINARY_API_SECRET,
+    });
+
+    const asset = await new Promise<StoryMediaAsset>((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        {
+          folder: 'eaz-community/stories',
+          resource_type: 'auto',
+          overwrite: false,
+          transformation: [{ width: 1600, crop: 'limit', quality: 'auto', fetch_format: 'auto' }],
+        },
+        (error, result) => {
+          if (error) {
+            reject(
+              new AppError(502, 'UPLOAD_FAILED', 'Story media upload failed', {
+                details: [error.message],
+              }),
+            );
+            return;
+          }
+          if (!result || !result.public_id) {
+            reject(new AppError(502, 'UPLOAD_FAILED', 'Story media upload returned no result'));
+            return;
+          }
+          const isVideo = result.resource_type === 'video';
+          resolve({
+            publicId: result.public_id,
+            url: result.secure_url,
+            width: result.width ?? 0,
+            height: result.height ?? 0,
+            resourceType: isVideo ? 'VIDEO' : 'IMAGE',
+            // Cloudinary reports `duration` in seconds; the field is stored in ms.
+            durationMs:
+              isVideo && typeof result.duration === 'number'
+                ? Math.round(result.duration * 1000)
+                : undefined,
+          });
+        },
+      );
+      stream.on('error', (error: Error) => {
+        reject(
+          new AppError(502, 'UPLOAD_FAILED', 'Story media upload stream failed', {
+            details: [error.message],
+          }),
+        );
+      });
+      stream.end(file.buffer);
+    });
+
+    logger.info(
+      { publicId: asset.publicId, resourceType: asset.resourceType },
+      'Story media uploaded to Cloudinary',
+    );
+    return asset;
+  }
+
   async deleteByPublicId(publicId: string): Promise<void> {
     const { v2: cloudinary } = await import('cloudinary');
     await cloudinary.uploader.destroy(publicId);
@@ -237,6 +401,20 @@ class LoggingMediaStorage implements MediaStorage {
       url: '',
       width: 0,
       height: 0,
+    };
+  }
+
+  async uploadStoryMedia(file: UploadableFile): Promise<StoryMediaAsset> {
+    logger.info(
+      { name: file.originalname, size: file.buffer.length, type: file.mimetype },
+      '[STORAGE] Story media upload skipped — Cloudinary not configured',
+    );
+    return {
+      publicId: `dev-${Date.now()}`,
+      url: '',
+      width: 0,
+      height: 0,
+      resourceType: 'IMAGE',
     };
   }
 

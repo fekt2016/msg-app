@@ -7,6 +7,7 @@ import { presenceStore, type PresenceStore } from './presence.js';
 import { communityEventBus } from './communityEvents.js';
 import { groupEventBus } from './groupEvents.js';
 import { channelEventBus } from './channelEvents.js';
+import { storyEventBus } from './storyEvents.js';
 import { groupRepository } from '../modules/groups/group.repository.js';
 import { communityRepository } from '../modules/communities/community.repository.js';
 import { channelRepository } from '../modules/channels/channel.repository.js';
@@ -82,6 +83,7 @@ export async function createRealtimeServer(
   communityEventBus.attach(io);
   groupEventBus.attach(io);
   channelEventBus.attach(io);
+  storyEventBus.attach(io);
 
   io.on('connection', (socket: Socket) => {
     const { userId } = socket.user!;
