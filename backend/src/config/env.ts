@@ -53,6 +53,12 @@ const envSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),
+  // When off (dev/test/CI), push notifications are logged instead of sent via
+  // Expo — mirrors the SMS/Typesense logging-fallback pattern.
+  PUSH_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
   CLOUDINARY_CLOUD_NAME: z.string().default(''),
   CLOUDINARY_API_KEY: z.string().default(''),
   CLOUDINARY_API_SECRET: z.string().default(''),

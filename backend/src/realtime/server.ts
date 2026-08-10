@@ -13,6 +13,7 @@ import { communityRepository } from '../modules/communities/community.repository
 import { channelRepository } from '../modules/channels/channel.repository.js';
 import { messageService } from '../modules/messages/message.service.js';
 import { groupMessageService } from '../modules/groupMessages/groupMessage.service.js';
+import { pushService } from '../modules/push/push.service.js';
 import {
   chatMessageNewSchema,
   chatMessageDeliveredSchema,
@@ -149,6 +150,15 @@ export async function createRealtimeServer(
         .catch((err: unknown) => {
           logger.warn({ err, senderId: userId }, 'Failed to persist chat message');
         });
+
+      // Best-effort push if the recipient is offline. Content is E2EE and the
+      // server cannot read it, so the notification is intentionally generic;
+      // `data` carries the sender for client-side deep-linking. Never throws.
+      void pushService.notifyIfOffline(payload.recipientId, {
+        title: 'New message',
+        body: 'You have a new message',
+        data: { type: 'chat:message', senderId: userId },
+      });
     });
 
     socket.on(REALTIME_EVENTS.CHAT_MESSAGE_DELIVERED, (raw: unknown) => {
@@ -342,6 +352,21 @@ export async function createRealtimeServer(
         .storeMessage({ groupId, senderId: userId, keyId, ciphertext, iv, timestamp })
         .catch((err: unknown) => {
           logger.warn({ err, userId, groupId }, 'Failed to persist group message');
+        });
+
+      // Best-effort push to offline members (sender excluded). Group content is
+      // E2EE via sender-keys, so the notification is generic. Never throws.
+      void groupRepository
+        .listMemberIds(groupId)
+        .then((memberIds) =>
+          pushService.notifyOfflineUsers(memberIds, userId, {
+            title: 'New group message',
+            body: 'You have a new message',
+            data: { type: 'chat:group:message', groupId },
+          }),
+        )
+        .catch((err: unknown) => {
+          logger.warn({ err, userId, groupId }, 'Failed to send group push notifications');
         });
     });
 

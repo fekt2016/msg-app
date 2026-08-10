@@ -11,6 +11,9 @@ import { groupRepository } from '../modules/groups/group.repository.js';
 vi.mock('../modules/groups/group.repository.js', () => ({
   groupRepository: {
     isMember: vi.fn(),
+    // The group message handler fans out best-effort push to offline members;
+    // default to an empty roster so those tests exercise the relay, not push.
+    listMemberIds: vi.fn(() => Promise.resolve([])),
   },
 }));
 
