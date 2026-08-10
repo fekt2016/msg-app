@@ -38,5 +38,5 @@ export type AppStackParamList = {
 
 export type RootStackParamList = {
   Auth: undefined;
-  App: undefined;
+  App: NavigatorScreenParams<AppStackParamList>;
 };

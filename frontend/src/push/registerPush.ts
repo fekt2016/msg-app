@@ -43,7 +43,10 @@ function resolveProjectId(): string | undefined {
  *  - skips the network call when the token is unchanged since last registration.
  *
  * Failures are surfaced to the caller (which logs/ignores) rather than thrown
- * into the auth flow — push is non-critical and must not block sign-in.
+ * into the auth flow — push is non-critical and must not block sign-in. The
+ * only call that can throw on an unsupported runtime (e.g. Android Expo Go,
+ * SDK 53+) is `getExpoPushTokenAsync`, which the `Device.isDevice` guard and
+ * that caller-level catch handle.
  */
 export async function ensurePushRegistered(userId: string, deviceId: string): Promise<void> {
   if (!Device.isDevice) {

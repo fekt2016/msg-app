@@ -5,12 +5,15 @@ import { useAuth } from '../auth/AuthContext';
 import { AuthNavigator } from './AuthNavigator';
 import { AppNavigator } from './AppNavigator';
 import type { RootStackParamList } from './types';
+import { navigationRef } from './navigationRef';
+import { usePushNavigation } from '../push/usePushNavigation';
 import { colors } from '../theme/tokens';
 
 const RootStack = createNativeStackNavigator<RootStackParamList>();
 
 export function RootNavigator() {
   const { isLoading, isAuthenticated } = useAuth();
+  usePushNavigation(isAuthenticated);
 
   if (isLoading) {
     return (
@@ -21,7 +24,7 @@ export function RootNavigator() {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       <RootStack.Navigator screenOptions={{ headerShown: false }}>
         {isAuthenticated ? (
           <RootStack.Screen name="App" component={AppNavigator} />

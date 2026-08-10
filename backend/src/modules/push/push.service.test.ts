@@ -124,6 +124,31 @@ describe('pushService.notifyIfOffline', () => {
       pushService.notifyIfOffline('u2', { title: 't', body: 'b' }),
     ).resolves.toBeUndefined();
   });
+
+  it('resolves a lazy builder only when a push is actually sent (offline + has tokens)', async () => {
+    const build = vi.fn(() => ({ title: 'Ama', body: 'Sent you a message' }));
+
+    // Online → builder must NOT run (no lookup on the hot path).
+    presence.getOnlineUserIds.mockResolvedValue(['u2']);
+    await pushService.notifyIfOffline('u2', build);
+    expect(build).not.toHaveBeenCalled();
+
+    // No devices → still no build.
+    presence.getOnlineUserIds.mockResolvedValue([]);
+    repo.listTokensByUserId.mockResolvedValue([]);
+    await pushService.notifyIfOffline('u2', build);
+    expect(build).not.toHaveBeenCalled();
+
+    // Offline + has tokens → build runs and its result is sent.
+    repo.listTokensByUserId.mockResolvedValue(['ExponentPushToken[a]']);
+    await pushService.notifyIfOffline('u2', build);
+    expect(build).toHaveBeenCalledTimes(1);
+    expect(provider.send).toHaveBeenCalledWith({
+      tokens: ['ExponentPushToken[a]'],
+      title: 'Ama',
+      body: 'Sent you a message',
+    });
+  });
 });
 
 describe('pushService.notifyOfflineUsers', () => {

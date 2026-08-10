@@ -18,6 +18,17 @@ export interface PushNotification {
   data?: Record<string, unknown>;
 }
 
+// A notification, or a builder resolved only when a push is actually going out
+// (recipient offline + has device tokens). The lazy form lets callers defer
+// expensive enrichment (e.g. a sender-name lookup) off the hot message path so
+// it never runs for the common online-recipient case.
+export type NotificationInput =
+  PushNotification | (() => PushNotification | Promise<PushNotification>);
+
+async function resolveNotification(input: NotificationInput): Promise<PushNotification> {
+  return typeof input === 'function' ? input() : input;
+}
+
 // The push token is a delivery secret — never echo it back to clients.
 function toPublicDevice(device: PushDeviceDoc): PublicDevice {
   return {
@@ -51,7 +62,7 @@ export const pushService = {
    * (an online user already receives the live socket event). Best-effort:
    * never throws — callers fire-and-forget from the realtime path.
    */
-  async notifyIfOffline(userId: string, notification: PushNotification): Promise<void> {
+  async notifyIfOffline(userId: string, notification: NotificationInput): Promise<void> {
     try {
       const online = await presenceStore.getOnlineUserIds();
       if (online.includes(userId)) {
@@ -61,7 +72,7 @@ export const pushService = {
       if (tokens.length === 0) {
         return;
       }
-      await pushProvider.send({ tokens, ...notification });
+      await pushProvider.send({ tokens, ...(await resolveNotification(notification)) });
     } catch (err) {
       logger.warn({ err, userId }, 'Failed to send push notification');
     }
@@ -75,7 +86,7 @@ export const pushService = {
   async notifyOfflineUsers(
     userIds: string[],
     senderId: string,
-    notification: PushNotification,
+    notification: NotificationInput,
   ): Promise<void> {
     try {
       const online = new Set(await presenceStore.getOnlineUserIds());
@@ -90,7 +101,7 @@ export const pushService = {
       if (tokens.length === 0) {
         return;
       }
-      await pushProvider.send({ tokens, ...notification });
+      await pushProvider.send({ tokens, ...(await resolveNotification(notification)) });
     } catch (err) {
       logger.warn({ err, senderId }, 'Failed to send group push notifications');
     }

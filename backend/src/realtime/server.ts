@@ -14,6 +14,7 @@ import { channelRepository } from '../modules/channels/channel.repository.js';
 import { messageService } from '../modules/messages/message.service.js';
 import { groupMessageService } from '../modules/groupMessages/groupMessage.service.js';
 import { pushService } from '../modules/push/push.service.js';
+import { userRepository } from '../modules/auth/user.repository.js';
 import {
   chatMessageNewSchema,
   chatMessageDeliveredSchema,
@@ -152,12 +153,18 @@ export async function createRealtimeServer(
         });
 
       // Best-effort push if the recipient is offline. Content is E2EE and the
-      // server cannot read it, so the notification is intentionally generic;
-      // `data` carries the sender for client-side deep-linking. Never throws.
-      void pushService.notifyIfOffline(payload.recipientId, {
-        title: 'New message',
-        body: 'You have a new message',
-        data: { type: 'chat:message', senderId: userId },
+      // server cannot read it, so the body stays generic; the sender's name
+      // (metadata, not content) titles the notification and rides `data` for
+      // client-side deep-linking. The lazy builder defers the name lookup so it
+      // only runs when a push is actually sent (offline recipient). Never throws.
+      void pushService.notifyIfOffline(payload.recipientId, async () => {
+        const sender = await userRepository.findById(userId);
+        const senderName = sender?.displayName ?? 'New message';
+        return {
+          title: senderName,
+          body: 'Sent you a message',
+          data: { type: 'chat:message', senderId: userId, senderName },
+        };
       });
     });
 
@@ -355,14 +362,20 @@ export async function createRealtimeServer(
         });
 
       // Best-effort push to offline members (sender excluded). Group content is
-      // E2EE via sender-keys, so the notification is generic. Never throws.
+      // E2EE via sender-keys, so the body stays generic; the group name (lazy,
+      // resolved only when a push is actually sent) titles it and rides `data`
+      // for deep-linking. Never throws.
       void groupRepository
         .listMemberIds(groupId)
         .then((memberIds) =>
-          pushService.notifyOfflineUsers(memberIds, userId, {
-            title: 'New group message',
-            body: 'You have a new message',
-            data: { type: 'chat:group:message', groupId },
+          pushService.notifyOfflineUsers(memberIds, userId, async () => {
+            const group = await groupRepository.findById(groupId);
+            const groupName = group?.name ?? 'New group message';
+            return {
+              title: groupName,
+              body: 'New message',
+              data: { type: 'chat:group:message', groupId, groupName },
+            };
           }),
         )
         .catch((err: unknown) => {
