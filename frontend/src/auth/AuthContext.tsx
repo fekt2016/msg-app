@@ -17,6 +17,7 @@ import { tokenStorage, type StoredUser } from './tokenStorage';
 import { refreshSession } from './refreshSession';
 import { ensureE2eeKeysRegistered } from '../e2ee/ensureKeys';
 import { flushOutbox, outboxStore } from '../e2ee/outbox';
+import { ensurePushRegistered, unregisterPush } from '../push/registerPush';
 
 const OUTBOX_FLUSH_INTERVAL_MS = 30_000;
 
@@ -88,6 +89,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           });
           void flushOutbox(storedUser.id).catch((err) => {
             console.error('[outbox] flush failed:', err);
+          });
+          void ensurePushRegistered(storedUser.id, id).catch((err) => {
+            console.error('[push] register failed:', err);
           });
         }
       } finally {
@@ -177,6 +181,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void flushOutbox(result.user.id).catch((err) => {
       console.error('[outbox] flush failed:', err);
     });
+    // Register this device for push so messages that arrive while the app is
+    // closed reach the user. Best-effort — never block sign-in. Resolves the
+    // device id itself (SecureStore-cached) to avoid a stale-closure read.
+    void (async () => {
+      const id = await getDeviceId();
+      await ensurePushRegistered(result.user.id, id);
+    })().catch((err) => {
+      console.error('[push] register failed:', err);
+    });
   }, []);
 
   const registerAndSendOtp = useCallback(
@@ -211,6 +224,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
+    // Deregister this device for push first so the departing user stops
+    // receiving notifications here. Best-effort — a failure must not block
+    // logout; read the user from storage to avoid a stale-closure id.
+    try {
+      const [storedUser, id] = await Promise.all([tokenStorage.getUser(), getDeviceId()]);
+      if (storedUser) {
+        await unregisterPush(storedUser.id, id);
+      }
+    } catch (err) {
+      console.error('[push] unregister failed:', err);
+    }
     try {
       const refreshToken = await tokenStorage.getRefreshToken();
       if (refreshToken) {

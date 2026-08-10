@@ -13,7 +13,27 @@ jest.mock('expo-secure-store', () => ({
 jest.mock('expo-application', () => ({
   __esModule: true,
   getAndroidId: jest.fn(() => 'test-android-id'),
-  default: { getAndroidId: jest.fn(() => 'test-android-id') },
+  nativeApplicationVersion: '1.0.0',
+  default: { getAndroidId: jest.fn(() => 'test-android-id'), nativeApplicationVersion: '1.0.0' },
+}));
+
+// Push notifications. `expo-device.isDevice` defaults to false so push
+// registration is a no-op in tests that don't specifically exercise it (they
+// import AuthContext transitively). The registerPush unit test overrides this
+// module locally.
+jest.mock('expo-device', () => ({
+  __esModule: true,
+  isDevice: false,
+}));
+
+jest.mock('expo-notifications', () => ({
+  __esModule: true,
+  setNotificationHandler: jest.fn(),
+  getPermissionsAsync: jest.fn(async () => ({ status: 'granted', canAskAgain: true })),
+  requestPermissionsAsync: jest.fn(async () => ({ status: 'granted', canAskAgain: true })),
+  getExpoPushTokenAsync: jest.fn(async () => ({ data: 'ExponentPushToken[test]' })),
+  setNotificationChannelAsync: jest.fn(async () => undefined),
+  AndroidImportance: { DEFAULT: 3 },
 }));
 
 jest.mock('expo-constants', () => ({
