@@ -622,6 +622,7 @@ describe('ChatScreen delivery and read status', () => {
     // as gibberish after an on-device identity regeneration). The ciphertext no
     // longer decrypts on this device; the bubble must show an explicit state,
     // not render the base64 ciphertext as if it were the message text.
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     mockCrypto.decryptMessage.mockRejectedValue(new Error('bad auth tag'));
     mockApiClient.get.mockResolvedValue({
       data: {
@@ -646,9 +647,25 @@ describe('ChatScreen delivery and read status', () => {
     });
     // The raw ciphertext must never appear on screen.
     expect(screen.queryByText(/ct-garbage-base64/)).toBeNull();
+
+    // The failure is logged with context (message + sender id, error class) —
+    // not silently swallowed — but NEVER with plaintext, ciphertext, or keys.
+    await waitFor(() => {
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('[e2ee] decrypt failed'),
+        'bad auth tag',
+      );
+    });
+    const logged = warnSpy.mock.calls.flat().join(' ');
+    expect(logged).toContain('m1');
+    expect(logged).toContain('u1');
+    expect(logged).not.toContain('ct-garbage-base64');
+    expect(logged).not.toContain('iv-hist');
+    warnSpy.mockRestore();
   });
 
   it('shows a "can\'t decrypt" state (never the raw ciphertext) for an undecryptable live message', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     mockCrypto.decryptMessage.mockRejectedValue(new Error('bad auth tag'));
     const { socket, emit } = makeSocket();
     await renderChat(socket);
@@ -666,6 +683,18 @@ describe('ChatScreen delivery and read status', () => {
       expect(screen.getByText(/can.t be decrypted on this device/)).toBeOnTheScreen();
     });
     expect(screen.queryByText(/ct-garbage-live/)).toBeNull();
+
+    // Live-incoming decrypt failure is logged with context, never the ciphertext.
+    await waitFor(() => {
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('[e2ee] decrypt failed'),
+        'bad auth tag',
+      );
+    });
+    const logged = warnSpy.mock.calls.flat().join(' ');
+    expect(logged).toContain('u2-12345');
+    expect(logged).not.toContain('ct-garbage-live');
+    warnSpy.mockRestore();
   });
 
   it('navigates back when the back arrow is pressed', async () => {

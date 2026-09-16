@@ -48,6 +48,23 @@ interface ChatMessage {
 }
 
 /**
+ * Logs a decryption failure with enough context to diagnose the "can't be
+ * decrypted on this device" bug (which message, which sender, what error class)
+ * WITHOUT ever leaking sensitive material. Per CLAUDE.md §15 this must never
+ * touch plaintext, ciphertext, keys, or the derived shared secret — only the
+ * message id, sender id, and the error's message string (AES-GCM auth-tag
+ * failures surface a generic "invalid tag"-style message that carries no
+ * secret). This visibility is the difference between a silent swallow and a
+ * diagnosable field report.
+ */
+function logDecryptFailure(context: { messageId: string; senderId: string }, err: unknown): void {
+  console.warn(
+    `[e2ee] decrypt failed (message=${context.messageId} sender=${context.senderId}):`,
+    err instanceof Error ? err.message : 'unknown error',
+  );
+}
+
+/**
  * Decrypts a persisted message fetched from the history endpoint. ECDH shared
  * secrets are symmetric, so the same secret derived from our identity private
  * key and the peer's identity public key works whether the message is ours or
@@ -76,10 +93,13 @@ async function decryptStoredMessage(
         text = await decryptMessage(sharedSecret, stored.ciphertext, stored.iv);
       }
     }
-  } catch {
-    // Decryption failed (missing/rotated keys) — leave `text` null so the row
-    // renders an explicit "can't decrypt" state. Never fall back to showing the
-    // raw ciphertext as if it were the message.
+  } catch (err) {
+    // Decryption failed (missing/rotated/diverged keys) — leave `text` null so
+    // the row renders an explicit "can't decrypt" state. Never fall back to
+    // showing the raw ciphertext as if it were the message. Log the failure
+    // (ids + error class only, never plaintext/ciphertext/keys) so a real field
+    // occurrence is diagnosable instead of silently swallowed.
+    logDecryptFailure({ messageId: stored.id, senderId: stored.senderId }, err);
   }
   return {
     id: stored.id,
@@ -196,9 +216,14 @@ export function ChatScreen({ route, navigation }: Props) {
               text = await decryptMessage(sharedSecret, payload.ciphertext, payload.iv);
             }
           }
-        } catch {
+        } catch (err) {
           // Decryption failed — leave `text` null so the bubble shows an explicit
-          // "can't decrypt" state, never the raw ciphertext.
+          // "can't decrypt" state, never the raw ciphertext. Log ids + error
+          // class only (never plaintext/ciphertext/keys) for diagnosability.
+          logDecryptFailure(
+            { messageId: `${payload.senderId}-${payload.timestamp}`, senderId: payload.senderId },
+            err,
+          );
         }
 
         const incoming: ChatMessage = {

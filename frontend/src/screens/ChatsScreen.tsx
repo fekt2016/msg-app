@@ -6,6 +6,7 @@ import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useAuth } from '../auth/AuthContext';
 import { useRealtime } from '../realtime/RealtimeProvider';
+import { RecoveryBanner } from '../components/RecoveryBanner';
 import { useChatUsers } from '../hooks/useChatUsers';
 import { useMatchContacts } from '../hooks/useMatchContacts';
 import {
@@ -65,6 +66,8 @@ export function ChatsScreen({ navigation }: Props) {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Chats</Text>
       </View>
+
+      <RecoveryBanner />
 
       <View style={styles.realtimeRow} accessibilityLabel="Realtime status">
         <View

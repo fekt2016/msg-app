@@ -39,7 +39,7 @@ jest.mock('./deviceId', () => ({
 }));
 
 jest.mock('../e2ee/ensureKeys', () => ({
-  ensureE2eeKeysRegistered: jest.fn(async () => undefined),
+  ensureE2eeKeysRegistered: jest.fn(async () => ({ created: false })),
   restoreE2eeKeys: jest.fn(async () => undefined),
 }));
 

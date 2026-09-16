@@ -16,6 +16,7 @@ import { getDeviceId } from './deviceId';
 import { tokenStorage, type StoredUser } from './tokenStorage';
 import { refreshSession } from './refreshSession';
 import { ensureE2eeKeysRegistered } from '../e2ee/ensureKeys';
+import { resolveRecoveryPrompt, type RecoveryPrompt } from '../e2ee/recoveryPrompt';
 import { flushOutbox, outboxStore } from '../e2ee/outbox';
 import { ensurePushRegistered, unregisterPush } from '../push/registerPush';
 
@@ -36,6 +37,14 @@ interface AuthContextValue {
   resendOtp: (input: { identifier: string; purpose: OtpPurpose }) => Promise<void>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  /**
+   * Recovery-backup nudge to surface after key bootstrap: 'backup' to set up a
+   * recovery phrase (new identity, no server backup), 'restore' to recover
+   * history (new device that has a backup), or 'none'. Cleared on dismissal or
+   * logout.
+   */
+  recoveryPrompt: RecoveryPrompt;
+  dismissRecoveryPrompt: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -56,6 +65,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [user, setUser] = useState<StoredUser | null>(null);
   const [deviceId, setDeviceId] = useState<string | null>(null);
+  const [recoveryPrompt, setRecoveryPrompt] = useState<RecoveryPrompt>('none');
+
+  const dismissRecoveryPrompt = useCallback(() => setRecoveryPrompt('none'), []);
 
   // Single session-teardown path. Queued drafts are plaintext held on this
   // device for the current user — never leave them readable by whoever signs in
@@ -66,6 +78,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await tokenStorage.clear();
     await outboxStore.clear();
     setUser(null);
+    setRecoveryPrompt('none');
   }, []);
 
   useEffect(() => {
@@ -84,9 +97,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // E2EE bootstrap for a restored session: publish this device's public
           // bundle if it isn't up yet, and drain any messages queued while the
           // app was closed. Fire-and-forget — a hiccup must not block launch.
-          void ensureE2eeKeysRegistered(storedUser.id).catch((err) => {
-            console.error('[e2ee] key bootstrap failed:', err);
-          });
+          void ensureE2eeKeysRegistered(storedUser.id)
+            .then(({ created }) => resolveRecoveryPrompt(created))
+            .then((prompt) => {
+              if (!cancelled) setRecoveryPrompt(prompt);
+            })
+            .catch((err) => {
+              console.error('[e2ee] key bootstrap failed:', err);
+            });
           void flushOutbox(storedUser.id).catch((err) => {
             console.error('[outbox] flush failed:', err);
           });
@@ -175,9 +193,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // sign-in so the account is messageable immediately (a public bundle must
     // exist before anyone can encrypt to us). Best effort — a transient upload
     // failure must not block auth; the interval and the outbox retry it.
-    await ensureE2eeKeysRegistered(result.user.id).catch((err) => {
-      console.error('[e2ee] key bootstrap failed:', err);
-    });
+    await ensureE2eeKeysRegistered(result.user.id)
+      .then(({ created }) => resolveRecoveryPrompt(created))
+      .then(setRecoveryPrompt)
+      .catch((err) => {
+        console.error('[e2ee] key bootstrap failed:', err);
+      });
     void flushOutbox(result.user.id).catch((err) => {
       console.error('[outbox] flush failed:', err);
     });
@@ -273,6 +294,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       resendOtp,
       logout,
       refreshProfile,
+      recoveryPrompt,
+      dismissRecoveryPrompt,
     }),
     [
       isLoading,
@@ -284,6 +307,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       resendOtp,
       logout,
       refreshProfile,
+      recoveryPrompt,
+      dismissRecoveryPrompt,
     ],
   );
 

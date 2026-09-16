@@ -48,6 +48,10 @@ jest.mock('socket.io-client', () => ({
   io: jest.fn(),
 }));
 
+jest.mock('@react-navigation/native', () => ({
+  useNavigation: () => ({ navigate: jest.fn() }),
+}));
+
 const mockSecure = SecureStore as unknown as {
   getItemAsync: jest.Mock;
   setItemAsync: jest.Mock;
