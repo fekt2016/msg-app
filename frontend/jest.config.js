@@ -13,6 +13,9 @@ module.exports = {
     '^@nozbe/watermelondb/adapters/sqlite$': '<rootDir>/src/db/testing/sqliteStub.ts',
   },
   testMatch: ['**/__tests__/**/*.test.ts?(x)', '**/?(*.)+(test).ts?(x)'],
+  // Detox E2E specs live in e2e/ and require a device; they run via detox, not
+  // the unit runner (see e2e/jest.config.js).
+  testPathIgnorePatterns: ['/node_modules/', '/e2e/'],
   setupFiles: ['<rootDir>/jest.setup.ts'],
   transformIgnorePatterns: [
     'node_modules/(?!((jest-)?react-native|@react-native(-community)?|@nozbe)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|@noble/.*|@scure/.*)',

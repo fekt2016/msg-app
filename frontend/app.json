@@ -38,7 +38,8 @@
         }
       ],
       "expo-video",
-      "expo-notifications"
+      "expo-notifications",
+      "@config-plugins/detox"
     ]
   }
 }

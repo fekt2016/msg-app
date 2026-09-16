@@ -11,7 +11,7 @@ type Props = NativeStackScreenProps<AuthStackParamList, 'Welcome'>;
 
 export function WelcomeScreen({ navigation }: Props) {
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={styles.safe} testID="welcome-screen">
       <StatusBar style="light" />
       <View style={styles.container}>
         <View style={styles.brand}>
@@ -28,8 +28,14 @@ export function WelcomeScreen({ navigation }: Props) {
         </View>
 
         <View style={styles.actions}>
-          <Button onPress={() => navigation.navigate('Register')}>Get started</Button>
-          <Button variant="secondary" onPress={() => navigation.navigate('Login')}>
+          <Button testID="welcome-get-started" onPress={() => navigation.navigate('Register')}>
+            Get started
+          </Button>
+          <Button
+            testID="welcome-log-in"
+            variant="secondary"
+            onPress={() => navigation.navigate('Login')}
+          >
             Log in
           </Button>
         </View>
