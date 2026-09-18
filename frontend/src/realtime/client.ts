@@ -45,6 +45,8 @@ export const REALTIME_EVENTS = {
   STORY_VIEWED: 'story:viewed',
   STORY_LIKED: 'story:liked',
   STORY_UNLIKED: 'story:unliked',
+  NOTIFICATION_NEW: 'notification:new',
+  NOTIFICATION_UNREAD: 'notification:unread',
 } as const;
 
 export interface EncryptedMessageEvent {
@@ -212,6 +214,22 @@ export interface StoryLikeEvent {
   userId: string;
   likeCount: number;
   at: string;
+}
+
+/** A freshly persisted in-app notification, delivered to the recipient's `user:{id}` room. */
+export interface NotificationNewEvent {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  data: Record<string, unknown>;
+  readAt: string | null;
+  createdAt: string;
+}
+
+/** The recipient's authoritative unread count — drives the tab badge. */
+export interface NotificationUnreadEvent {
+  unreadCount: number;
 }
 
 const host =

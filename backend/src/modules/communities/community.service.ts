@@ -3,6 +3,7 @@ import { communityRepository } from './community.repository.js';
 import type { MemberRole } from './communityMember.model.js';
 import { searchProvider } from '../search/typesense.js';
 import { communityEventBus } from '../../realtime/communityEvents.js';
+import { notificationService } from '../notifications/notification.service.js';
 import { logger } from '../../config/logger.js';
 import type { CommunityDoc } from './community.model.js';
 
@@ -265,6 +266,13 @@ export const communityService = {
     }
     await communityRepository.updateMemberRole(community.id, targetUserId, role);
     communityEventBus.emitRoleUpdated(community.id, targetUserId, role);
+    // In-app notification to the affected member only — the actor already knows.
+    void notificationService.communityRoleUpdated(
+      community.slug,
+      community.name,
+      targetUserId,
+      role,
+    );
   },
 
   async listMembers(

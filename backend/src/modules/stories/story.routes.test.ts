@@ -7,6 +7,20 @@ import * as userRepositoryModule from '../auth/user.repository.js';
 import * as mediaStorageModule from '../users/mediaStorage.js';
 import * as storyEventsModule from '../../realtime/storyEvents.js';
 
+vi.mock('../notifications/notification.service.js', () => ({
+  notificationService: {
+    storyLiked: vi.fn(),
+    channelPostCreated: vi.fn(),
+    channelRequestApproved: vi.fn(),
+    communityRoleUpdated: vi.fn(),
+    groupMemberJoined: vi.fn(),
+    groupMemberRemoved: vi.fn(),
+    chatMessage: vi.fn(),
+  },
+}));
+
+import { notificationService } from '../notifications/notification.service.js';
+
 vi.mock('../../modules/auth/token.service.js', () => ({
   signAccessToken: vi.fn(() => 'access-token'),
   signRefreshToken: vi.fn(() => 'refresh-token'),
@@ -447,6 +461,7 @@ describe('PUT /api/v1/stories/:storyId/like', () => {
     );
     expect(repo.adjustLikeCount).toHaveBeenCalledWith(STORY_ID, 1);
     expect(bus.emitStoryLiked).toHaveBeenCalledWith(STORY_ID, 'user-2', 'user-1', 1);
+    expect(notificationService.storyLiked).toHaveBeenCalledWith(STORY_ID, 'user-1', 'user-2');
   });
 
   it('is a no-op when already liked (duplicate key)', async () => {

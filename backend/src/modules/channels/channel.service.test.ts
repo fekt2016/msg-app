@@ -3,6 +3,20 @@ import * as channelRepositoryModule from './channel.repository.js';
 import * as searchModule from '../search/typesense.js';
 import { channelService } from './channel.service.js';
 
+vi.mock('../notifications/notification.service.js', () => ({
+  notificationService: {
+    channelRequestApproved: vi.fn(),
+    channelPostCreated: vi.fn(),
+    communityRoleUpdated: vi.fn(),
+    groupMemberJoined: vi.fn(),
+    groupMemberRemoved: vi.fn(),
+    storyLiked: vi.fn(),
+    chatMessage: vi.fn(),
+  },
+}));
+
+import { notificationService } from '../notifications/notification.service.js';
+
 vi.mock('../../realtime/channelEvents.js', () => ({
   CHANNEL_EVENTS: {
     POST_NEW: 'channel:post:new',
@@ -941,6 +955,11 @@ describe('channelService.decideJoinRequest', () => {
       'user-2',
       'APPROVED',
       'user-1',
+    );
+    expect(notificationService.channelRequestApproved).toHaveBeenCalledWith(
+      'accra-news',
+      'Accra News',
+      'user-2',
     );
   });
 

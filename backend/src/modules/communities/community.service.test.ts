@@ -4,6 +4,20 @@ import * as searchModule from '../search/typesense.js';
 import * as eventBusModule from '../../realtime/communityEvents.js';
 import { communityService } from './community.service.js';
 
+vi.mock('../notifications/notification.service.js', () => ({
+  notificationService: {
+    communityRoleUpdated: vi.fn(),
+    channelPostCreated: vi.fn(),
+    channelRequestApproved: vi.fn(),
+    groupMemberJoined: vi.fn(),
+    groupMemberRemoved: vi.fn(),
+    storyLiked: vi.fn(),
+    chatMessage: vi.fn(),
+  },
+}));
+
+import { notificationService } from '../notifications/notification.service.js';
+
 vi.mock('./community.repository.js', () => ({
   communityRepository: {
     create: vi.fn(),
@@ -355,6 +369,12 @@ describe('communityService.updateRole', () => {
 
     expect(repo.updateMemberRole).toHaveBeenCalledWith('community-1', 'user-2', 'MODERATOR');
     expect(eventBus.emitRoleUpdated).toHaveBeenCalledWith('community-1', 'user-2', 'MODERATOR');
+    expect(notificationService.communityRoleUpdated).toHaveBeenCalledWith(
+      'accra-tech',
+      'Accra Tech',
+      'user-2',
+      'MODERATOR',
+    );
   });
 
   it('cannot assign the OWNER role', async () => {

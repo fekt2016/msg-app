@@ -5,6 +5,7 @@ import { storyLikeRepository } from './storyLike.repository.js';
 import { mediaStorage, sniffStoryMedia, type UploadableFile } from '../users/mediaStorage.js';
 import { userRepository } from '../auth/user.repository.js';
 import { storyEventBus } from '../../realtime/storyEvents.js';
+import { notificationService } from '../notifications/notification.service.js';
 import { env } from '../../config/env.js';
 import type { StoryDoc, StoryMediaType } from './story.model.js';
 
@@ -287,6 +288,8 @@ export const storyService = {
     const updated = await storyRepository.adjustLikeCount(storyId, 1);
     const likeCount = updated?.likeCount ?? (story.likeCount ?? 0) + 1;
     storyEventBus.emitStoryLiked(storyId, story.authorId.toString(), userId, likeCount);
+    // In-app notification to the author (never the liker themselves). Best-effort.
+    void notificationService.storyLiked(storyId, userId, story.authorId.toString());
     return { liked: true, likeCount };
   },
 

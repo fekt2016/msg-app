@@ -12,6 +12,7 @@ export type MainTabsParamList = {
   Home: undefined;
   Communities: undefined;
   Chats: undefined;
+  Notifications: undefined;
   Profile: undefined;
 };
 

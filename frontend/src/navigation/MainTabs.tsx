@@ -4,7 +4,9 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { HomeScreen } from '../screens/HomeScreen';
 import { CommunitiesScreen } from '../screens/CommunitiesScreen';
 import { ChatsScreen } from '../screens/ChatsScreen';
+import { NotificationsScreen } from '../screens/NotificationsScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
+import { useUnreadNotificationCount } from '../hooks/useNotifications';
 import type { MainTabsParamList } from './types';
 import { colors } from '../theme/tokens';
 
@@ -16,10 +18,13 @@ const TAB_ICONS: Record<keyof MainTabsParamList, { active: IconName; inactive: I
   Home: { active: 'home', inactive: 'home-outline' },
   Communities: { active: 'planet', inactive: 'planet-outline' },
   Chats: { active: 'chatbubbles', inactive: 'chatbubbles-outline' },
+  Notifications: { active: 'notifications', inactive: 'notifications-outline' },
   Profile: { active: 'person', inactive: 'person-outline' },
 };
 
 export function MainTabs() {
+  const { data: unreadCount } = useUnreadNotificationCount();
+
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -52,6 +57,14 @@ export function MainTabs() {
         name="Chats"
         component={ChatsScreen}
         options={{ tabBarAccessibilityLabel: 'Chats tab' }}
+      />
+      <Tab.Screen
+        name="Notifications"
+        component={NotificationsScreen}
+        options={{
+          tabBarAccessibilityLabel: 'Notifications tab',
+          tabBarBadge: unreadCount && unreadCount > 0 ? unreadCount : undefined,
+        }}
       />
       <Tab.Screen
         name="Profile"

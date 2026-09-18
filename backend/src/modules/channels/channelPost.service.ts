@@ -3,6 +3,7 @@ import { channelService } from './channel.service.js';
 import { channelRepository } from './channel.repository.js';
 import { channelPostRepository } from './channelPost.repository.js';
 import { channelEventBus } from '../../realtime/channelEvents.js';
+import { notificationService } from '../notifications/notification.service.js';
 import { userRepository } from '../auth/user.repository.js';
 import {
   isSupportedImage,
@@ -68,6 +69,15 @@ export const channelPostService = {
     const [safePost] = await enrichAuthors([post]);
     const enriched = safePost!;
     channelEventBus.emitPostNew(channel.id, enriched);
+    // In-app fan-out to subscribers, excluding the author. Best-effort.
+    void notificationService.channelPostCreated(
+      channel.slug,
+      channel.name,
+      await channelRepository.listSubscriberIds(channel.id),
+      userId,
+      enriched.author.displayName,
+      enriched.id,
+    );
     return enriched;
   },
 

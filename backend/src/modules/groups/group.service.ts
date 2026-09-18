@@ -3,6 +3,7 @@ import { groupRepository } from './group.repository.js';
 import { userRepository } from '../auth/user.repository.js';
 import { groupKeyService } from '../e2ee/groupKey.service.js';
 import { groupEventBus } from '../../realtime/groupEvents.js';
+import { notificationService } from '../notifications/notification.service.js';
 import { GROUP_MAX_MEMBERS } from './group.model.js';
 import type { GroupDoc } from './group.model.js';
 import type { GroupMemberRole } from './groupMember.model.js';
@@ -145,6 +146,15 @@ export const groupService = {
       for (const memberId of added) {
         groupEventBus.emitMemberJoined(groupId, memberId);
       }
+      // In-app notification for each added member to the *existing* members
+      // (the actor added them and doesn't need one). Best-effort.
+      const currentMemberIds = await groupRepository.listMemberIds(groupId);
+      const notifyRecipients = currentMemberIds.filter(
+        (id) => !added.includes(id) && id !== actorId,
+      );
+      for (const memberId of added) {
+        void notificationService.groupMemberJoined(groupId, group.name, memberId, notifyRecipients);
+      }
     }
     return { added };
   },
@@ -162,6 +172,8 @@ export const groupService = {
     await groupRepository.incrementMemberCount(groupId, -1);
     await groupKeyService.purgeMember(groupId, targetUserId);
     groupEventBus.emitMemberLeft(groupId, targetUserId);
+    // In-app notification to the removed member — the actor already knows.
+    void notificationService.groupMemberRemoved(groupId, group.name, targetUserId);
   },
 
   async leave(userId: string, groupId: string): Promise<void> {

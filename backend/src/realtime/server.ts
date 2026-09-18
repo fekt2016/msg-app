@@ -8,12 +8,14 @@ import { communityEventBus } from './communityEvents.js';
 import { groupEventBus } from './groupEvents.js';
 import { channelEventBus } from './channelEvents.js';
 import { storyEventBus } from './storyEvents.js';
+import { notificationEventBus } from './notificationEvents.js';
 import { groupRepository } from '../modules/groups/group.repository.js';
 import { communityRepository } from '../modules/communities/community.repository.js';
 import { channelRepository } from '../modules/channels/channel.repository.js';
 import { messageService } from '../modules/messages/message.service.js';
 import { groupMessageService } from '../modules/groupMessages/groupMessage.service.js';
 import { pushService } from '../modules/push/push.service.js';
+import { notificationService } from '../modules/notifications/notification.service.js';
 import { userRepository } from '../modules/auth/user.repository.js';
 import {
   chatMessageNewSchema,
@@ -86,6 +88,7 @@ export async function createRealtimeServer(
   groupEventBus.attach(io);
   channelEventBus.attach(io);
   storyEventBus.attach(io);
+  notificationEventBus.attach(io);
 
   io.on('connection', (socket: Socket) => {
     const { userId } = socket.user!;
@@ -166,6 +169,11 @@ export async function createRealtimeServer(
           data: { type: 'chat:message', senderId: userId, senderName },
         };
       });
+
+      // In-app notification for the recipient (online or not — the unread badge
+      // is the point of the notification center). Metadata only, E2EE-safe;
+      // coalesced per sender so a busy chat doesn't flood the feed. Best-effort.
+      void notificationService.chatMessage(userId, payload.recipientId);
     });
 
     socket.on(REALTIME_EVENTS.CHAT_MESSAGE_DELIVERED, (raw: unknown) => {

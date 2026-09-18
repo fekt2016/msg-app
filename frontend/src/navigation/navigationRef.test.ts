@@ -33,6 +33,45 @@ describe('navigateFromPushData', () => {
     });
   });
 
+  it('routes a group-member-joined notification to the GroupChat screen', () => {
+    navigateFromPushData({ type: 'group:member:joined', groupId: 'g1', groupName: 'Team' });
+    expect(navigate).toHaveBeenCalledWith('App', {
+      screen: 'GroupChat',
+      params: { groupId: 'g1', name: 'Team' },
+    });
+  });
+
+  it('routes a community role notification to the CommunityDetail screen', () => {
+    navigateFromPushData({ type: 'community:role', identifier: 'accra-tech' });
+    expect(navigate).toHaveBeenCalledWith('App', {
+      screen: 'CommunityDetail',
+      params: { identifier: 'accra-tech' },
+    });
+  });
+
+  it('routes channel post and join-approval notifications to the ChannelDetail screen', () => {
+    navigateFromPushData({ type: 'channel:post:new', identifier: 'accra-news' });
+    navigateFromPushData({ type: 'channel:request:approved', identifier: 'accra-news' });
+    expect(navigate).toHaveBeenCalledWith('App', {
+      screen: 'ChannelDetail',
+      params: { identifier: 'accra-news' },
+    });
+    expect(navigate).toHaveBeenCalledTimes(2);
+  });
+
+  it('routes a story-like notification to the author’s StoryViewer', () => {
+    navigateFromPushData({ type: 'story:liked', authorId: 'u1', authorDisplayName: 'Ama' });
+    expect(navigate).toHaveBeenCalledWith('App', {
+      screen: 'StoryViewer',
+      params: { authorId: 'u1', displayName: 'Ama' },
+    });
+  });
+
+  it('ignores a group-member-left notification (no surface to open)', () => {
+    navigateFromPushData({ type: 'group:member:left', groupId: 'g1', groupName: 'Team' });
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
   it('is a no-op when the container is not ready', () => {
     isReady.mockReturnValue(false);
     navigateFromPushData({ type: 'chat:message', senderId: 'u1' });

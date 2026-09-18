@@ -5,8 +5,23 @@ vi.mock('./channel.repository.js', () => ({
     findByIdOrSlug: vi.fn(),
     findSubscriber: vi.fn(),
     incrementPostCount: vi.fn(),
+    listSubscriberIds: vi.fn(),
   },
 }));
+
+vi.mock('../notifications/notification.service.js', () => ({
+  notificationService: {
+    channelPostCreated: vi.fn(),
+    channelRequestApproved: vi.fn(),
+    communityRoleUpdated: vi.fn(),
+    groupMemberJoined: vi.fn(),
+    groupMemberRemoved: vi.fn(),
+    storyLiked: vi.fn(),
+    chatMessage: vi.fn(),
+  },
+}));
+
+import { notificationService } from '../notifications/notification.service.js';
 
 vi.mock('./channelPost.repository.js', () => ({
   channelPostRepository: {
@@ -101,6 +116,7 @@ describe('channelPostService.createPost', () => {
   it('creates a post as a manager and increments the post count', async () => {
     repo.findByIdOrSlug.mockResolvedValue(fakeChannel());
     repo.findSubscriber.mockResolvedValue({ role: 'OWNER' });
+    repo.listSubscriberIds.mockResolvedValue(['user-2', 'user-3']);
     postRepo.createPost.mockResolvedValue(fakePost());
     userRepo.findByIds.mockResolvedValue([
       {
@@ -114,6 +130,14 @@ describe('channelPostService.createPost', () => {
 
     expect(postRepo.createPost).toHaveBeenCalledWith('channel-1', 'user-1', 'Hello world');
     expect(repo.incrementPostCount).toHaveBeenCalledWith('channel-1', 1);
+    expect(notificationService.channelPostCreated).toHaveBeenCalledWith(
+      'accra-news',
+      'Accra News',
+      ['user-2', 'user-3'],
+      'user-1',
+      'Ama',
+      'post-1',
+    );
     expect(result.author.displayName).toBe('Ama');
     expect(result.body).toBe('Hello world');
   });

@@ -28,6 +28,19 @@ vi.mock('./channel.repository.js', () => ({
     findByIdOrSlug: vi.fn(),
     findSubscriber: vi.fn(),
     incrementPostCount: vi.fn(),
+    listSubscriberIds: vi.fn(),
+  },
+}));
+
+vi.mock('../notifications/notification.service.js', () => ({
+  notificationService: {
+    channelPostCreated: vi.fn(),
+    channelRequestApproved: vi.fn(),
+    communityRoleUpdated: vi.fn(),
+    groupMemberJoined: vi.fn(),
+    groupMemberRemoved: vi.fn(),
+    storyLiked: vi.fn(),
+    chatMessage: vi.fn(),
   },
 }));
 
@@ -145,6 +158,7 @@ beforeEach(() => {
 describe('POST /api/v1/channels/:identifier/posts', () => {
   it('creates a post as a channel manager and returns 201', async () => {
     mockManager();
+    repo.listSubscriberIds.mockResolvedValue(['user-2']);
     postRepo.createPost.mockResolvedValue(fakePost());
     mockEnrich();
 

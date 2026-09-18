@@ -5,6 +5,20 @@ import * as userRepositoryModule from '../auth/user.repository.js';
 import * as groupKeyServiceModule from '../e2ee/groupKey.service.js';
 import * as groupEventsModule from '../../realtime/groupEvents.js';
 
+vi.mock('../notifications/notification.service.js', () => ({
+  notificationService: {
+    groupMemberJoined: vi.fn(),
+    groupMemberRemoved: vi.fn(),
+    communityRoleUpdated: vi.fn(),
+    channelPostCreated: vi.fn(),
+    channelRequestApproved: vi.fn(),
+    storyLiked: vi.fn(),
+    chatMessage: vi.fn(),
+  },
+}));
+
+import { notificationService } from '../notifications/notification.service.js';
+
 vi.mock('./group.repository.js', () => ({
   groupRepository: {
     create: vi.fn(),
@@ -133,12 +147,13 @@ describe('groupService.getForMember', () => {
 });
 
 describe('groupService.addMembers', () => {
-  it('adds only new members and emits joined events', async () => {
+  it('adds only new members, emits joined events, and notifies the existing members', async () => {
     repo.findById.mockResolvedValue(makeGroup('g-1', OWNER, { memberCount: 2 }));
     users.findByIds.mockResolvedValue(existingUsers(['u-2', 'u-3']));
     repo.findMember
       .mockResolvedValueOnce({ role: 'MEMBER' } as never) // u-2 already a member
       .mockResolvedValueOnce(null); // u-3 is new
+    repo.listMemberIds.mockResolvedValue([OWNER, 'u-2']);
 
     const result = await groupService.addMembers(OWNER, 'g-1', ['u-2', 'u-3']);
 
@@ -146,6 +161,9 @@ describe('groupService.addMembers', () => {
     expect(repo.addMember).toHaveBeenCalledWith('g-1', 'u-3', 'MEMBER');
     expect(repo.incrementMemberCount).toHaveBeenCalledWith('g-1', 1);
     expect(bus.emitMemberJoined).toHaveBeenCalledWith('g-1', 'u-3');
+    expect(notificationService.groupMemberJoined).toHaveBeenCalledWith('g-1', 'Squad', 'u-3', [
+      'u-2',
+    ]);
   });
 
   it('forbids a non-owner from adding members', async () => {
@@ -167,6 +185,7 @@ describe('groupService.removeMember', () => {
     expect(repo.incrementMemberCount).toHaveBeenCalledWith('g-1', -1);
     expect(groupKeys.purgeMember).toHaveBeenCalledWith('g-1', 'u-2');
     expect(bus.emitMemberLeft).toHaveBeenCalledWith('g-1', 'u-2');
+    expect(notificationService.groupMemberRemoved).toHaveBeenCalledWith('g-1', 'Squad', 'u-2');
   });
 
   it('refuses to remove the owner', async () => {

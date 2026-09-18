@@ -18,6 +18,7 @@ import { e2eeRouter } from './modules/e2ee/e2ee.routes.js';
 import { groupKeyRouter } from './modules/e2ee/groupKey.routes.js';
 import { recoveryBackupRouter } from './modules/e2ee/recoveryBackup.routes.js';
 import { pushRouter } from './modules/push/push.routes.js';
+import { notificationRouter } from './modules/notifications/notification.routes.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { buildRateLimitStore } from './middleware/rateLimitStore.js';
 
@@ -132,6 +133,7 @@ export function createApp(): Express {
   apiV1.use('/e2ee', e2eeRouter);
   apiV1.use('/e2ee/groups', groupKeyRouter);
   apiV1.use('/push', pushRouter);
+  apiV1.use('/notifications', notificationRouter);
   app.use('/api/v1', apiV1);
 
   app.use(notFoundHandler);

@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { AppError } from '../../errors/AppError.js';
 import { channelRepository } from './channel.repository.js';
 import { channelEventBus } from '../../realtime/channelEvents.js';
+import { notificationService } from '../notifications/notification.service.js';
 import { searchProvider } from '../search/typesense.js';
 import { logger } from '../../config/logger.js';
 import type { ChannelRole } from './channelSubscriber.model.js';
@@ -487,6 +488,8 @@ export const channelService = {
       await channelRepository.addSubscriber(channel.id, targetUserId, 'SUBSCRIBER');
       await channelRepository.incrementSubscriberCount(channel.id, 1);
       channelEventBus.emitSubscriberJoined(channel.id, targetUserId, 'SUBSCRIBER');
+      // In-app notification to the requester — their request was granted.
+      void notificationService.channelRequestApproved(channel.slug, channel.name, targetUserId);
     }
     const status = action === 'APPROVE' ? 'APPROVED' : 'DENIED';
     await channelRepository.setJoinRequestStatus(channel.id, targetUserId, status, actorId);

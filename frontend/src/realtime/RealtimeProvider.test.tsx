@@ -1,9 +1,17 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import * as SecureStore from 'expo-secure-store';
 import { Button, Text } from 'react-native';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from '../auth/AuthContext';
 import { RealtimeProvider, useRealtime } from './RealtimeProvider';
 import * as client from './client';
+
+jest.mock('../api/notifications', () => ({
+  listNotifications: jest.fn(),
+  getUnreadNotificationCount: jest.fn(),
+  markNotificationRead: jest.fn(),
+  markAllNotificationsRead: jest.fn(),
+}));
 
 jest.mock('../api/client', () => ({
   apiClient: {
@@ -108,13 +116,18 @@ function LogoutButton() {
 }
 
 function renderProvider() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   return render(
-    <AuthProvider>
-      <RealtimeProvider>
-        <Probe />
-        <LogoutButton />
-      </RealtimeProvider>
-    </AuthProvider>,
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <RealtimeProvider>
+          <Probe />
+          <LogoutButton />
+        </RealtimeProvider>
+      </AuthProvider>
+    </QueryClientProvider>,
   );
 }
 

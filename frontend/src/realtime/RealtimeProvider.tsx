@@ -8,8 +8,16 @@ import {
   type ReactNode,
 } from 'react';
 import type { Socket } from 'socket.io-client';
-import { realtimeClient, REALTIME_EVENTS, type PresenceList, type PresenceUpdate } from './client';
+import { useQueryClient } from '@tanstack/react-query';
+import {
+  realtimeClient,
+  REALTIME_EVENTS,
+  type NotificationUnreadEvent,
+  type PresenceList,
+  type PresenceUpdate,
+} from './client';
 import { useAuth } from '../auth/AuthContext';
+import { notificationKeys } from '../hooks/useNotifications';
 
 interface RealtimeContextValue {
   connected: boolean;
@@ -25,6 +33,7 @@ const RealtimeContext = createContext<RealtimeContextValue | undefined>(undefine
  */
 export function RealtimeProvider({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
+  const queryClient = useQueryClient();
   const [connected, setConnected] = useState(false);
   const [onlineUserIds, setOnlineUserIds] = useState<string[]>([]);
 
@@ -47,7 +56,11 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     void realtimeClient.open().then((s) => {
       socket = s;
 
-      s.on(REALTIME_EVENTS.CONNECT, () => setConnected(true));
+      s.on(REALTIME_EVENTS.CONNECT, () => {
+        setConnected(true);
+        // A reconnect may have missed notifications — re-sync the badge.
+        void queryClient.invalidateQueries({ queryKey: notificationKeys.unreadCount() });
+      });
       s.on(REALTIME_EVENTS.DISCONNECT, () => setConnected(false));
 
       s.on(REALTIME_EVENTS.PRESENCE_LIST, (payload: PresenceList) => {
@@ -63,6 +76,16 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
         });
       });
 
+      // In-app notification center: refresh the feed when a new notification
+      // lands and apply the authoritative unread count to the tab badge.
+      s.on(REALTIME_EVENTS.NOTIFICATION_NEW, () => {
+        void queryClient.invalidateQueries({ queryKey: notificationKeys.feed() });
+      });
+
+      s.on(REALTIME_EVENTS.NOTIFICATION_UNREAD, (payload: NotificationUnreadEvent) => {
+        queryClient.setQueryData(notificationKeys.unreadCount(), payload.unreadCount);
+      });
+
       if (s.connected) setConnected(true);
     });
 
@@ -71,7 +94,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       socket?.disconnect();
       socket?.removeAllListeners();
     };
-  }, [user, logout]);
+  }, [user, logout, queryClient]);
 
   const isOnline = useCallback((userId: string) => onlineUserIds.includes(userId), [onlineUserIds]);
 
