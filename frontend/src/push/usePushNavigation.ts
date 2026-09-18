@@ -1,6 +1,9 @@
 import { useEffect } from 'react';
-import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import { navigateFromPushData } from '../navigation/navigationRef';
+import type * as NotificationsNs from 'expo-notifications';
+
+type NotificationsModule = typeof NotificationsNs;
 
 /**
  * Routes taps on push notifications to the referenced chat. Handles both:
@@ -10,10 +13,34 @@ import { navigateFromPushData } from '../navigation/navigationRef';
  *
  * Gated on `isAuthenticated` because the target screens live in the
  * authenticated stack — a tap received while signed out is ignored.
+ *
+ * expo-notifications is resolved lazily; on Android in Expo Go (SDK 53+) its
+ * module throws at import time, so tap-to-open is skipped there rather than
+ * crashing the app.
  */
 export function usePushNavigation(isAuthenticated: boolean): void {
   useEffect(() => {
     if (!isAuthenticated) {
+      return;
+    }
+
+    // expo-notifications is removed from Expo Go (SDK 53+); requiring it there
+    // logs an error and resolves to a non-functional object. Skip entirely.
+    if (Constants.executionEnvironment === 'storeClient') {
+      return;
+    }
+
+    let Notifications: NotificationsModule;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      Notifications = require('expo-notifications') as NotificationsModule;
+    } catch {
+      return;
+    }
+    if (
+      typeof Notifications.getLastNotificationResponseAsync !== 'function' ||
+      typeof Notifications.addNotificationResponseReceivedListener !== 'function'
+    ) {
       return;
     }
 

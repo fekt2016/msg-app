@@ -1,6 +1,7 @@
 import * as SecureStore from 'expo-secure-store';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
+import * as Constants from 'expo-constants';
 import { ensurePushRegistered, unregisterPush } from './registerPush';
 import * as pushApi from '../api/push';
 
@@ -12,6 +13,13 @@ jest.mock('../api/push', () => ({
 // Override the global (isDevice: false) so the happy path runs; individual
 // tests flip it back to false to assert the no-op guard.
 jest.mock('expo-device', () => ({ __esModule: true, isDevice: true }));
+
+// Provide an EAS projectId so `resolveProjectId` resolves and the guard that
+// skips registration without one doesn't short-circuit the happy path.
+jest.mock('expo-constants', () => ({
+  __esModule: true,
+  default: { expoConfig: { extra: { eas: { projectId: 'proj-1' } } } },
+}));
 
 const getItem = SecureStore.getItemAsync as jest.Mock;
 const setItem = SecureStore.setItemAsync as jest.Mock;
@@ -69,6 +77,25 @@ describe('ensurePushRegistered', () => {
     getItem.mockResolvedValue('ExponentPushToken[old]');
     await ensurePushRegistered('u1', 'dev-1');
     expect(registerDevice).toHaveBeenCalled();
+  });
+
+  it('is a no-op when no EAS projectId is available and warns with an actionable hint', async () => {
+    // Simulate a dev build without `eas init`/EXPO_PUBLIC_EAS_PROJECT_ID —
+    // expo-notifications SDK 53+ cannot infer the id from the manifest here.
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    // The default import used by registerPush.ts is the `default` property
+    // on the namespace object returned by the global jest.mock.
+    const constantsMock = Constants as unknown as {
+      default: { expoConfig?: Record<string, unknown> };
+    };
+    constantsMock.default.expoConfig = { extra: {} };
+
+    await ensurePushRegistered('u1', 'dev-1');
+
+    expect(getToken).not.toHaveBeenCalled();
+    expect(registerDevice).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('EXPO_PUBLIC_EAS_PROJECT_ID'));
+    warn.mockRestore();
   });
 });
 
