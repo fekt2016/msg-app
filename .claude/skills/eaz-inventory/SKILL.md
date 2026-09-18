@@ -1,11 +1,13 @@
 ---
 name: eaz-inventory
-description: 'Forward design (Phase 3, not yet built) for stock/inventory management — atomic reserve/release/decrement, ledger, concurrency handling. Use when starting Marketplace inventory work.'
+description: 'Re-scoped (2026-09-18) — catalog + inquiries only. No orders mean no reserve/release/decrement ledger paths; inventory reduces to stock visibility (in/out-of-stock per SKU) plus seller stock edits. Needs a visibility-only re-write before Marketplace work.'
 ---
 
 # Inventory
 
-> **Status: design-only.** This documents the Phase 3 Marketplace domain per `.opencode/DATABASE_DESIGN.md` §4.7–4.8 — no inventory module exists in `backend/src/modules/` yet. Treat this as the plan to build against, not a description of existing code.
+> **Status: RE-SCOPED — 2026-09-18.** The "no in-app payments" decision (marketplace = **catalog + inquiries only**, no orders) removes the atomic reserve/release/decrement and inventory-transaction-ledger machinery that justified this skill: nothing reserves stock anymore. What remains is **stock visibility** — a per-SKU in/out-of-stock flag maintained by the seller, used only to badge the catalog and filter searches. The reserve/release ledger, warehouses, and BullMQ stock paths below are superseded (see `.opencode/ROADMAP.md` Phase 6). This file still documents the removed reserve/release design; a catalog-only re-write is required before Marketplace work starts.
+
+> **Status: design-only (historical).** This documents the Phase 3 Marketplace domain per `.opencode/DATABASE_DESIGN.md` §4.7–4.8 — no inventory module exists in `backend/src/modules/` yet. Treat this as the plan to build against, not a description of existing code.
 
 ## Purpose
 

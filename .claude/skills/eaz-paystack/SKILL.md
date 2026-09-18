@@ -1,11 +1,13 @@
 ---
 name: eaz-paystack
-description: 'Forward design (Phase 3, not yet built) for Paystack payment integration — initialization, webhook verification, idempotent fulfillment, refunds. Use when starting Marketplace payments work.'
+description: 'OBSOLETE (2026-09-18) — no payment gateway on this app. "Catalog + inquiries only" decision removed Paystack/checkout/orders. This file is kept only as a record of the removed decision. Do not use for new work.'
 ---
 
 # Paystack Payments
 
-> **Status: design-only.** This documents the Phase 3 Marketplace domain per `.opencode/DATABASE_DESIGN.md` §4.13–4.14 — no payment module exists in `backend/src/modules/` yet. Treat this as the plan to build against, not a description of existing code. Gateway decision (Paystack + MoMo/Hubtel) is confirmed in `.opencode/PROJECT_SPEC.md` §6.
+> **Status: OBSOLETE — superseded 2026-09-18.** The project decided **no in-app payments** — the marketplace is **catalog + inquiries only** (product catalog, inventory visibility, business pages, buyer→seller inquiries). Paystack, checkout, orders, payment webhooks, and refunds are **removed from scope** (see `.opencode/PROJECT_SPEC.md` §1/§6/§9, `.opencode/ROADMAP.md` Phase 6, `CLAUDE.md` §2/§6). This file is retained solely as a record of the removed decision — do not build against it. The marketplace skills needing catalog-only re-write: `eaz-product-catalog`, `eaz-inventory`, plus a new `eaz-marketplace-inquiries` or equivalent.
+
+> **Status: design-only (historical).** This documents the Phase 3 Marketplace domain per `.opencode/DATABASE_DESIGN.md` §4.13–4.14 — no payment module exists in `backend/src/modules/` yet. Treat this as the plan to build against, not a description of existing code. Gateway decision (Paystack + MoMo/Hubtel) is confirmed in `.opencode/PROJECT_SPEC.md` §6.
 
 ## Purpose
 

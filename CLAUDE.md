@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 1. Project Overview
 
-**Eaz Community** — a community-first communication platform for Ghana and Africa: messaging, communities, AI, marketplace, and digital payments in one cross-platform mobile app (Android & iOS, mobile-first). Target users span individuals, businesses, schools, churches, mosques, organizations, government, and SMEs.
+**Eaz Community** — a community-first communication platform for Ghana and Africa: messaging, communities, AI, marketplace, and notifications in one cross-platform mobile app (Android & iOS, mobile-first). **No in-app payments** (decided 2026-09-18 — the marketplace is catalog + buyer→seller inquiries only). Target users span individuals, businesses, schools, churches, mosques, organizations, government, and SMEs.
 
 Development follows a strict phased roadmap (see §6) and a "finish one feature completely before starting the next" discipline — a feature isn't done until every applicable layer (Backend / Mobile / Database / API / Socket / Validation / Testing / Documentation / Security review / Code review) is signed off, with Database/Socket explicitly markable **N/A** when a feature genuinely has no schema or realtime component.
 
@@ -12,12 +12,12 @@ This project was previously scaffolded and driven with **OpenCode** (`.opencode/
 
 ## 2. Tech Stack
 
-| Layer   | Stack                                                                                                                                                                                                                             |
-| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Mobile  | React Native, Expo (SDK 57), TypeScript, React Navigation, TanStack Query, Axios, Socket.IO Client, React Hook Form, Zod, WatermelonDB (offline persistence), EAS (OTA/build pipeline)                                            |
-| Backend | Express.js (v5), TypeScript, MongoDB, Mongoose, Socket.IO, Redis, BullMQ, JWT, Cloudinary + Multer (media), Paystack (payments, Phase 3), `libsignal` (E2EE), Africa's Talking (OTP/SMS), Typesense (search, public content only) |
-| Infra   | Docker / Docker Compose (MongoDB, Redis, Typesense), pnpm workspaces, GitHub Actions CI, Sentry (planned), Firebase Cloud Messaging (planned), AWS/DigitalOcean + Nginx (planned)                                                 |
-| Tooling | ESLint (flat config, shared) + Prettier + husky + lint-staged, Vitest (backend), Jest/`jest-expo` (frontend), Swagger/OpenAPI (`swagger-jsdoc` + `swagger-ui-express`)                                                            |
+| Layer   | Stack                                                                                                                                                                                                                                        |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Mobile  | React Native, Expo (SDK 57), TypeScript, React Navigation, TanStack Query, Axios, Socket.IO Client, React Hook Form, Zod, WatermelonDB (offline persistence), EAS (OTA/build pipeline)                                                       |
+| Backend | Express.js (v5), TypeScript, MongoDB, Mongoose, Socket.IO, Redis, BullMQ, JWT, Cloudinary + Multer (media), `libsignal` (E2EE), Africa's Talking (OTP/SMS), Typesense (search, public content only). No payment gateway (decided 2026-09-18) |
+| Infra   | Docker / Docker Compose (MongoDB, Redis, Typesense), pnpm workspaces, GitHub Actions CI, Sentry (planned), Firebase Cloud Messaging (planned), AWS/DigitalOcean + Nginx (planned)                                                            |
+| Tooling | ESLint (flat config, shared) + Prettier + husky + lint-staged, Vitest (backend), Jest/`jest-expo` (frontend), Swagger/OpenAPI (`swagger-jsdoc` + `swagger-ui-express`)                                                                       |
 
 **Decided architecture (not open questions):**
 
@@ -64,7 +64,7 @@ Root: `docker-compose.yml` (Mongo/Redis/Typesense), `pnpm-workspace.yaml`, root 
 - `.opencode/ENGINEERING_RULES.md` — engineering standards (this file merges and supersedes it as the primary reference, but it's the fuller version)
 - `.opencode/ROADMAP.md` — phase plan and status
 - `.opencode/TASKS.md` — feature-level checklist; a box is checked only when the _full_ completion checklist is done, not just "backend done" — check this before assuming a listed feature is finished
-- `.opencode/DATABASE_DESIGN.md` — full collection/index/schema design for the Marketplace domain (Phase 3, not yet built) — the authoritative source for exact field lists; §11 has the soft-delete decision
+- `.opencode/DATABASE_DESIGN.md` — full collection/index/schema design for the Marketplace domain (design-only, not yet built) — the authoritative source for exact field lists; §11 has the soft-delete decision. **Post-2026-09-18 the orders/payments/refunds/cart sections are superseded** — the marketplace is catalog + inquiries only
 - `.opencode/skills/` — deep how-to guides per domain, migrated 1:1 into `.claude/skills/` (see §14) with corrections; use the Claude Code skills, not the `.opencode` copies, going forward
 
 ## 4. Coding Standards
@@ -141,16 +141,16 @@ Requirements → Architecture Review → Database Design (skip if no schema chan
 
 **Phases** (full detail in `.opencode/ROADMAP.md`):
 
-| Phase                      | Scope                                                                                                              | Status                                                                                                                            |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| 0 — Foundation             | Monorepo, workspaces, Docker, CI, env validation, lint/format/hooks, Swagger, test frameworks, offline DB scaffold | Done                                                                                                                              |
-| 1 — Core Messaging         | Auth (OTP), profiles, E2EE 1:1 + group key-distribution + recovery-key backup, private/group chat, Socket.IO+Redis | In progress — see `.opencode/TASKS.md` for exact remaining items (recovery-key flow in review; 1:1 forward secrecy)               |
-| 2 — Community Features     | Search (Typesense, decided), object storage decision, Communities, Channels, Stories, push notifications           | In progress (Communities complete; Channels CH1–CH6 backend + mobile done on `feature/phase-2-channels`, pending review + merge)  |
-| 3 — Marketplace & Payments | Products/orders/inventory, business pages, Paystack checkout, idempotent webhooks, seller KYC                      | Pending — design fully specified in `.opencode/DATABASE_DESIGN.md` and the marketplace skills (§14), nothing built yet            |
-| 4 — Realtime Calls         | WebRTC signaling + TURN/STUN, voice, video                                                                         | Pending (deliberately sequenced after Marketplace — TURN infra is slower to get right, and Marketplace/Payments generate revenue) |
-| 5 — Intelligence           | AI assistant, translation, on-device-only summary/smart-reply for private chats                                    | Pending                                                                                                                           |
-| 6 — Platform & Admin       | Business accounts, admin dashboard, moderation, settings/privacy, Ghana Data Protection Act (Act 843) compliance   | Pending                                                                                                                           |
-| 7 — Scale & Release        | Analytics, full load testing, store releases, production deploy/monitoring/backups                                 | Pending                                                                                                                           |
+| Phase                  | Scope                                                                                                                                         | Status                                                                                                                                                                 |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0 — Foundation         | Monorepo, workspaces, Docker, CI, env validation, lint/format/hooks, Swagger, test frameworks, offline DB scaffold                            | Done                                                                                                                                                                   |
+| 1 — Core Messaging     | Auth (OTP), profiles, E2EE 1:1 + group key-distribution + recovery-key backup, private/group chat, Socket.IO+Redis                            | In progress — see `.opencode/TASKS.md` for exact remaining items (recovery-key flow in review; 1:1 forward secrecy)                                                    |
+| 2 — Community Features | Search (Typesense, decided), object storage decision, Communities, Channels, Stories, push notifications                                      | In progress (Communities complete; Channels CH1–CH6 backend + mobile done on `feature/phase-2-channels`, pending review + merge)                                       |
+| 3 — Realtime Calls     | WebRTC signaling + TURN/STUN, voice, video                                                                                                    | Pending                                                                                                                                                                |
+| 4 — Intelligence       | AI assistant, translation, on-device-only summary/smart-reply for private chats                                                               | Pending                                                                                                                                                                |
+| 5 — Platform & Admin   | Business accounts, admin dashboard, moderation, settings/privacy, Ghana Data Protection Act (Act 843) compliance                              | Pending                                                                                                                                                                |
+| 6 — Marketplace        | Product catalog + inventory visibility, business pages, buyer→seller inquiries — **no orders, no checkout, no payments** (decided 2026-09-18) | Pending — last feature phase (only Scale & Release follows); forward design in `.opencode/DATABASE_DESIGN.md` + marketplace skills (§14) needs a catalog-only re-write |
+| 7 — Scale & Release    | Analytics, full load testing, store releases, production deploy/monitoring/backups                                                            | Pending                                                                                                                                                                |
 
 Before starting work, check `.opencode/TASKS.md` for what's actually next in the current phase — the project enforces one feature fully complete before the next starts.
 
@@ -211,7 +211,7 @@ Cross-cutting rules that apply to every collection, implemented or planned:
 - **Mocking convention (frontend, important — a real bug class in this codebase):** modules mocked across many files are mocked once in `jest.setup.ts`; individual test files cast the import to `jest.Mock`/`jest.Mocked<...>` (see `src/auth/tokenStorage.test.ts`) rather than re-declaring `jest.mock()` locally. When a test-local mock is genuinely needed, define the `jest.fn()`s **inline inside the `jest.mock()` factory** (see `src/api/users.test.ts`) — never as outer `const mock* = jest.fn()` bindings referenced from the factory. Jest's hoisting runs the factory before those outer bindings are initialized despite the `mock`-prefix naming exception looking like it should work, so the mocked methods silently end up `undefined` at runtime. (`frontend/src/e2ee/{groupCrypto,groupE2eeApi,groupKeyStore}.test.ts` were previously cited as live instances of this bug; they now follow the correct pattern — inline `jest.fn()`s in the factory plus typed casts of the imported module — and pass. `src/e2ee/groupSession.test.ts` is another worked example.)
 - Test the contract, not the implementation: assert on the response envelope / public behavior, not internal calls.
 - Repositories are tested against a real Mongo (integration), not mocked — Mongoose internals aren't a useful mock boundary. Services mock their repository. API tests use `supertest` against the mounted app and must cover the auth/ownership/validation error paths, not just the happy path.
-- Never hit real Cloudinary/Paystack/Africa's Talking/SMTP in tests — mock the HTTP boundary and assert on the request the service makes.
+- Never hit real Cloudinary/Africa's Talking/SMTP in tests — mock the HTTP boundary and assert on the request the service makes.
 - When fixing a bug, write the regression test first.
 
 Single-test-run commands are in §13.
@@ -305,7 +305,7 @@ No MCP (Model Context Protocol) server configuration was found anywhere in this 
 Domain-specific how-to guides live in `.claude/skills/<name>/SKILL.md`, migrated from `.opencode/skills/`. Invoke with `/skill-name` or let Claude Code surface them contextually. See §14 of the migration summary for status per skill; in short:
 
 - Matches the current stack, safe to follow as-is: `eaz-backend-architecture`, `eaz-api-patterns`, `eaz-authentication`, `eaz-testing`, `eaz-image-upload`, `eaz-code-review`.
-- Describes the Marketplace domain (Phase 3, fully designed in `.opencode/DATABASE_DESIGN.md`, **not yet built**) — accurate as a forward design guide, not as a description of existing code: `eaz-product-catalog`, `eaz-inventory`, `eaz-order-management`, `eaz-paystack`.
+- Describes the Marketplace domain (last feature phase; forward design in `.opencode/DATABASE_DESIGN.md` + these skills — **SCOPE CHANGE 2026-09-18:** commerce is now **catalog + inquiries only**, no orders/payments/checkout, and these skills' order/payment content is superseded pending a catalog-only re-write). Accurate for existing code? No — none of it is built yet: `eaz-product-catalog`, `eaz-inventory`, `eaz-order-management` (orders = obsolete, needs re-scope to visibility only), `eaz-paystack` (obsolete — no payment gateway; kept only as a record of the removed decision).
 - **Do not treat as accurate for this codebase without confirming scope first**: `eaz-web-frontend` (Next.js) and `eaz-admin-dashboard` assume a Next.js web client. This project is React Native/Expo mobile-only; a web app is explicitly hypothetical in `.opencode/PROJECT_SPEC.md` ("if this project ships a web app, add a Web Engineer role"). These two skills were carried over for when/if that's decided, not because a web app exists today.
 
 ## graphify

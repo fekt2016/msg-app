@@ -139,7 +139,8 @@ Engineer wires it into the listing form).
 
 **Responsibilities**
 
-- Products, orders, inventory, payments, checkout, business pages
+- Product catalog, inventory visibility, business pages, buyer→seller
+  inquiries. **No orders, no checkout, no payments** (decided 2026-09-18).
 
 ---
 

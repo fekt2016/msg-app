@@ -6,11 +6,14 @@ Mobile, Database, API, Socket — each ✅ or signed-off **N/A** —
 Validation, Testing, Documentation, Security reviewed, Review) before
 the next begins. Task-level tracking lives in `TASKS.md`.
 
-Commerce (Phase 3) is sequenced ahead of Realtime Calls (Phase 4):
-Calls need WebRTC/TURN infrastructure that's slower to get right, and
-Marketplace/Payments are the revenue-generating features — confirmed
-ordering, not open for revision without an explicit Architecture
-Review decision.
+Commerce (Marketplace & Payments) is sequenced **last** among the
+feature phases — calls, intelligence, and platform/admin ship first,
+and only deployment/release work (Scale & Release) follows it. This is
+an explicit Architecture Review ordering decision (2026-09-18): the app
+is community- and messaging-first; Calls (WebRTC/TURN), Intelligence,
+and Platform & Admin deepen that core value, and the commercial layer
+is deliberately held until the non-revenue product surface is mature.
+Do not reorder without another explicit Architecture Review decision.
 
 ## Phase 0: Foundation
 
@@ -39,28 +42,33 @@ Object storage strategy
 decided · Communities · Channels · Stories · Push notifications (FCM)
 · In-app notification center.
 
-## Phase 3: Marketplace & Payments
-
-Marketplace (products, orders, inventory) · Business pages · Paystack
-payments and checkout · Order webhooks (idempotent) · Business/seller
-KYC requirements decided and implemented.
-
-## Phase 4: Realtime Calls
+## Phase 3: Realtime Calls
 
 WebRTC signaling + TURN/STUN provisioning · Voice calls · Video calls.
 
-## Phase 5: Intelligence
+## Phase 4: Intelligence
 
 AI assistant · Translation · Message summary and smart reply — run
 on-device for private chats (server never sees plaintext under full
 E2EE); server-side variants permitted only for Channels/Communities
 content.
 
-## Phase 6: Platform & Admin
+## Phase 5: Platform & Admin
 
 Business accounts · Admin dashboard · Reports and moderation · Settings
 and privacy controls · Ghana Data Protection Act (Act 843) compliance
 pass.
+
+## Phase 6: Marketplace
+
+**Catalog + inquiries only — no orders, no checkout, no payments**
+(decided 2026-09-18). Product catalog (categories, products, variants,
+media) with search and filter/pagination · Inventory visibility
+(in/out-of-stock per SKU; no reserve/release ledger) · Business pages
+· Buyer→seller inquiries (contact outside the app via chat/DM intent).
+Requires a catalog-only re-write of the Marketplace sections of
+`.opencode/DATABASE_DESIGN.md` and the marketplace skills before any
+build. There is no Paystack/payment/checkout scope.
 
 ## Phase 7: Scale & Release
 
@@ -77,8 +85,8 @@ backups.
 | Foundation             | 0     | In progress                               |
 | Core Messaging         | 1     | In progress                               |
 | Community Features     | 2     | In progress (Communities partially built) |
-| Marketplace & Payments | 3     | Pending                                   |
-| Realtime Calls         | 4     | Pending                                   |
-| Intelligence           | 5     | Pending                                   |
-| Platform & Admin       | 6     | Pending                                   |
+| Realtime Calls         | 3     | Pending                                   |
+| Intelligence           | 4     | Pending                                   |
+| Platform & Admin       | 5     | Pending                                   |
+| Marketplace & Payments | 6     | Pending (last feature phase)              |
 | Scale & Release        | 7     | Pending                                   |

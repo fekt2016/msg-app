@@ -6,14 +6,16 @@
 **Project Type:** Cross-platform mobile application (Android & iOS)
 **Primary Platform:** Mobile First
 **Purpose:** A community-first communication platform for Ghana and
-Africa, combining messaging, communities, AI, marketplace, and digital
-payments into one application.
+Africa, combining messaging, communities, AI, marketplace, and
+notifications into one application. **No in-app payments** — the
+marketplace is a catalog + inquiry surface (buyers contact sellers
+off-app); the platform is not a payments/transactions business.
 
 ## 2. Vision
 
 Create Africa's most trusted communication platform — enabling
 individuals, businesses, schools, churches, organizations, and
-communities to communicate, collaborate, and transact securely.
+communities to communicate, collaborate, and connect securely.
 
 ## 3. Mission
 
@@ -43,9 +45,10 @@ strong preference given; override if needed).
 ### Backend
 
 Express.js, TypeScript, MongoDB, Mongoose, Socket.IO, Redis, BullMQ,
-JWT, Cloudinary, Multer, Paystack. WebRTC signaling + TURN/STUN for
+JWT, Cloudinary, Multer. WebRTC signaling + TURN/STUN for
 calls (provider: see **Open Decisions**). Search engine: see **Open
 Decisions**. Object storage strategy: see **Open Decisions**.
+**No payment gateway** — decided 2026-09-18 (no Paystack, no checkout).
 
 ### Infrastructure
 
@@ -63,18 +66,20 @@ Review. No unfinished modules.
 ## 8. Development Order — Phased
 
 See `ROADMAP.md` for the authoritative phase list and current status.
-Commerce (Marketplace & Payments) is sequenced ahead of Realtime Calls
-— Calls require WebRTC/TURN infrastructure that's slower to build
-correctly, while Marketplace/Payments are the revenue-generating
-features and shouldn't wait behind it.
+**Marketplace is the last feature phase** — decided 2026-09-18. Calls
+(WebRTC/TURN), Intelligence, and Platform & Admin ship before it, and
+only deployment/release (Scale & Release) follows. The marketplace is
+**catalog + inquiries only** (no orders, no checkout, no payments): the
+app is community- and messaging-first, and the commercial layer is
+deliberately held until the non-revenue product surface is mature.
 
 ## 9. Functional Modules
 
 Authentication · Users · Friends · Private Chats · Group Chats ·
-Communities · Channels · Stories · Calls · Marketplace · Orders ·
-Payments · Notifications · AI · Settings · Reports · Administration ·
-**Moderation / Trust & Safety** (first-class module, not a subset of
-Reports)
+Communities · Channels · Stories · Calls · Marketplace (catalog +
+inquiries, no payments) · Notifications · AI · Settings · Reports ·
+Administration · **Moderation / Trust & Safety** (first-class module,
+not a subset of Reports)
 
 ## 10. Backend Rules
 
@@ -174,12 +179,12 @@ index, Raft HA; chosen over MongoDB Atlas Search because the stack is
 self-hosted (no Atlas) and over Meilisearch for predictable
 self-hosting. See `.opencode/DATABASE_DESIGN.md` §11).
 
-| Decision                                                                                                                             | Blocks                                                | Options                                                              |
-| ------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------- | -------------------------------------------------------------------- |
-| Search engine (scope now limited to public content only — Communities, Channels, Marketplace; private messages are excluded per §15) | Phase 2 (Communities/Channels), Phase 3 (Marketplace) | **Typesense (decided)** · MongoDB Atlas Search · Meilisearch         |
-| Object storage strategy                                                                                                              | Phase 2 (Stories media), scale generally              | Cloudinary-only · S3-compatible (Spaces/Backblaze) behind Cloudinary |
-| Business/seller KYC requirements                                                                                                     | Phase 3 (Payments go-live)                            | To be defined                                                        |
-| Analytics tool                                                                                                                       | Phase 7                                               | PostHog · Mixpanel · Amplitude                                       |
+| Decision                                                                                                                             | Blocks                                      | Options                                                                                               |
+| ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Search engine (scope now limited to public content only — Communities, Channels, Marketplace; private messages are excluded per §15) | Phase 2 (Communities/Channels), Marketplace | **Typesense (decided)** · MongoDB Atlas Search · Meilisearch                                          |
+| Object storage strategy                                                                                                              | Phase 2 (Stories media), scale generally    | Cloudinary-only · S3-compatible (Spaces/Backblaze) behind Cloudinary                                  |
+| Seller verification for business pages (formerly "Business/seller KYC", payment-gated)                                               | Marketplace (business pages)                | Removed with payments (2026-09-18); re-scope as optional verified badge in Platform & Admin if wanted |
+| Analytics tool                                                                                                                       | Phase 7                                     | PostHog · Mixpanel · Amplitude                                                                        |
 
 ## 21. Long-Term Goal
 

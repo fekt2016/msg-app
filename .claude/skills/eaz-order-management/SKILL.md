@@ -1,11 +1,13 @@
 ---
 name: eaz-order-management
-description: 'Forward design (Phase 3, not yet built) for the order lifecycle — cart, checkout, state machine, shipping, cancellation, returns. Use when starting Marketplace order work.'
+description: 'OBSOLETE (2026-09-18) — superseded by the "catalog + inquiries only" decision. No orders/checkout/carts on this app. Needs a re-scope to inventory-visibility only (retained as a record of the removed design). Do not use for new work.'
 ---
 
 # Order Management
 
-> **Status: design-only.** This documents the Phase 3 Marketplace domain per `.opencode/DATABASE_DESIGN.md` §4.10–4.12 — no order/cart module exists in `backend/src/modules/` yet. Treat this as the plan to build against, not a description of existing code.
+> **Status: OBSOLETE — superseded 2026-09-18.** The project decided **no in-app payments** — the marketplace is **catalog + inquiries only** (product catalog, inventory visibility, business pages, buyer→seller inquiries). Cart, checkout, orders, shipping, cancellations, and returns are **removed from scope** (see `.opencode/PROJECT_SPEC.md` §1/§6/§9, `.opencode/ROADMAP.md` Phase 6, `CLAUDE.md` §2/§6). Retained only as a record of the removed design — do not build against it. The order section of `.opencode/DATABASE_DESIGN.md` (§4.10–4.12) is likewise superseded; inventory work should follow the visibility-only re-scope of `eaz-inventory`.
+
+> **Status: design-only (historical).** This documents the Phase 3 Marketplace domain per `.opencode/DATABASE_DESIGN.md` §4.10–4.12 — no order/cart module exists in `backend/src/modules/` yet. Treat this as the plan to build against, not a description of existing code.
 
 ## Purpose
 

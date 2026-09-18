@@ -6,6 +6,16 @@
 **Integrates with:** Authentication/Users, Notifications, Administration
 **Source of truth:** `PROJECT_SPEC.md` (requirements), `ENGINEERING_RULES.md` §4 (database rules)
 
+> **SCOPE CHANGE 2026-09-18 (apply before any Marketplace build):** the "**no in-app
+> payments**" decision re-scopes commerce to **catalog + inquiries only** — product catalog,
+> categories/products/variants, business pages, buyer→seller inquiries, and inventory
+> _visibility_ (in/out-of-stock per SKU). The **orders, payments, refunds, carts, checkout,
+> and inventory reserve/release-ledger collections and state machines in this document are
+> superseded and must not be built** until this file gets a catalog-only re-write (tracked in
+> `.opencode/TASKS.md`). Sections §4.5–4.12 (carts/orders/order_events/inventory ledgers) and
+> §4.13–4.14 (payments/refunds) are historical only from that date; §4.1–4.4 (categories,
+> brands, products, product variants) remain in scope as the catalog core.
+
 > This document defines **what** to store and **how** it is structured. Implementation
 > patterns (service/repository layers, atomic updates) are covered by the skills in
 > `.opencode/skills/`. Out of scope: messaging/chat, communities, stories, and calls —
